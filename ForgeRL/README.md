@@ -48,8 +48,51 @@ The previous per-actor-thread implementation is retained as
 single-request zero-copy counters.
 
 M1 is **not performance accepted**. Acceptance still requires a pinned-hardware `>=2x` valid-row
-result and a formal five-seed report for both environments whose final `m1-final.json` stattÈ\Â˜ÓØˆÜ™Y[ˆÜİYÒH[Û™H\È›İ]]šY[˜ÙK‚‚ˆÈÈ]ZXÚÈİ\‚˜˜\Úœ]Ûˆ[H™[ˆ™[‚œÛİ\˜ÙH™[‹Øš[‹ØXİ]˜]Bœ\[œİ[YH	Ë–Ù]‹Ş[WIÂœ]\İ\Bœ]ÛˆØÜš\ËØ™[˜ÚX\š×Ù[‹œHKY[ˆØ\ÛK]ŒHK\İ\ÈLœ]ÛˆØÜš\ËØ™[˜ÚX\š×Ü[[YKœHKZ][\ÈŒœ]ÛˆØÜš\ËØ™[˜ÚX\š×ÛLWÚ[™™\™[˜ÙKœHˆKXXİÜœÈK\™\]Y\İË\\‹XXİÜˆLˆKXÛÛXİÜ‹\Û[\ÈŒHK[X^Y˜Z[‹\\‹Y[™Ú[œ]ÛˆØÜš\ËØ™[˜ÚX\š×ÛLWØXØÙ\[˜ÙKœHˆKXXİÜœÈˆK\™\]Y\İË\\‹XXİÜˆKZ][\Ë\\‹\™\]Y\İˆˆK]ÚYMˆK[X^X˜]ÚZ][\ÈK]Œ‹[Z[‹X˜]ÚZ][\ÈˆK]›İYÚ]YØ]Hœ]ÛˆØÜš\ËØ™[˜ÚX\š×ÛLWÛX\›š[™ËœHˆK\Û[ÚÙHK\ÙYYÈÈˆKY[š\›Û›Y[ÈØ\ÛK]ŒK[™[[K]ŒHˆK[İ]]™[˜ÚX\šÜËÜ™\İ[ËÛLK[X\›š[™Ë\Û[ÚÙKšœÛÛ‚˜‚ˆÈÈ›Ü›X[LH^Xİ][Û‚‚•HX[X[™Ú]X‹İÛÜšÙ›İÜËÙ›Ü™ÙK\›[LKY›Ü›X[[[ÛÜšÙ›İÈ\™Ù]ÈH[›™YÙ[‹ZÜİY[›™\‚›X™[Y›Ü™Ù\›X™[˜ÚX\šØˆ][œÈH›Ü›X[Z\™Yš]™K\ÙYYX\›š[™ÈØ]KHÛÛ›ÛYœŞ[]XÈ›İYÚ]Ø]K[™Hš[˜[K\™\]Z\™KYÛØXÚ\Ú[ÛˆÚ]İ]™\XÚ[™ÈH[›™\‰ÜÂœ™K\›İš\Ú[Û™Y]Ûˆ[š\›Û›Y[‚‚ˆÈÈ[š]X[™[˜ÚX\šÈ[š\›Û›Y[Â‚‹HØ\ÛK]ŒXˆ\ØÜ™]KXXİ[ÛˆÛÜœ™Xİ™\ÜÈ[™[YK]Ë]\™Ù]Â‹H[™[[K]ŒXˆÛÛ[[İ\ËXXİ[ÛˆÛÜœ™Xİ™\ÜÈ[™[YK]Ë]\™Ù]Â‹H][™Ö›ÛÈTHÚ[\WÜÜ™XYİŒØˆ]\ˆ][KXYÙ[ÓPTÈ\İ[™ÎÂ‹HÜ[Û˜[Ş[[˜\Ú][H]R›ĞÛÈ[]Xˆ]\ˆÛİYØØ[[™È[™ÛÛ[[İ\ÈÛÛ›Û‚‚•H™Y™\™[˜ÙHÈ\È[ˆLHXØÙ\[˜ÙHİXš™Xİ›İÛÛ\][ÛˆÙˆHLÈ[ÛÜš]K\YÚ[ˆÛÜšËˆBÊÊÈÛİ[\ˆ[š\›Û›Y[\ÈH[[YKĞP’H™[˜ÚX\šË›İHX\›š[™Ë\]X[]H™[˜ÚX\šË‚‚ˆÈÈ™\ÜÚ]ÜHİ]\Â‚XØÙ\[˜ÙHØ]\È[™™[XZ[š[™ÈÛÜšÈ\™H˜XÚÙY[ˆØØÜËÔ“ĞQPT›YJØÜËÔ“ĞQPT›Y
-KˆB˜™[˜ÚX\šÈY]ÙÛÙŞH\ÈYš[™Y[ˆØØÜËĞ‘SÒPT’ÔË›YJØÜËĞ‘SÒPT’ÔË›Y
-K[™H^XİLBœ›ØÙY\™H\È[ˆØØÜËÓLWĞPĞÑTSÑK›YJØÜËÓLWĞPĞÑTSÑK›Y
-KˆHÊÊÈ[š\›Û›Y[›İ[™\H\Â™Øİ[Y[Y[ˆØØÜËĞÔÕ‘PÕÔ—ÑS•—ĞP’K›YJØÜËĞÔÕ‘PÕÔ—ÑS•—ĞP’K›Y
-K‚
+result and a formal five-seed report for both environments whose final `m1-final.json` status is
+`GO`. Green hosted CI alone is not that evidence.
+
+## Quick start
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,gym]'
+pytest -q
+python scripts/benchmark_env.py --env CartPole-v1 --steps 10000
+python scripts/benchmark_runtime.py --items 200000
+python scripts/benchmark_m1_inference.py \
+  --actors 4 --requests-per-actor 1000 \
+  --collector-poll-ms 0.25 --max-drain-per-endpoint 4
+python scripts/benchmark_m1_acceptance.py \
+  --actors 2 --requests-per-actor 8 --items-per-request 2 \
+  --width 16 --max-batch-items 8 --v2-min-batch-items 4 \
+  --throughput-gate 0
+python scripts/benchmark_m1_learning.py \
+  --smoke --seeds 7 \
+  --environments CartPole-v1,Pendulum-v1 \
+  --output benchmarks/results/m1-learning-smoke.json
+```
+
+## Formal M1 execution
+
+The manual `.github/workflows/forge-rl-m1-formal.yml` workflow targets a pinned self-hosted runner
+labelled `forgerl-benchmark`. It runs the formal paired five-seed learning gate, the controlled
+synthetic throughput gate, and the final `--require-go` decision without replacing the runner's
+pre-provisioned Python environment.
+
+## Initial benchmark environments
+
+- `CartPole-v1`: discrete-action correctness and time-to-target;
+- `Pendulum-v1`: continuous-action correctness and time-to-target;
+- PettingZoo MPE `simple_spread_v3`: later multi-agent/MAPPO testing;
+- optional Gymnasium MuJoCo `Ant-v5`: later cloud scaling and continuous control.
+
+The reference PPO is an M1 acceptance subject, not completion of the M3 algorithm-plugin work. The
+C++ counter environment is a runtime/ABI benchmark, not a learning-quality benchmark.
+
+## Repository status
+
+Acceptance gates and remaining work are tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). The
+benchmark methodology is defined in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md), and the exact M1
+procedure is in [`docs/M1_ACCEPTANCE.md`](docs/M1_ACCEPTANCE.md). The C++ environment boundary is
+documented in [`docs/CPP_VECTOR_ENV_ABI.md`](docs/CPP_VECTOR_ENV_ABI.md).
