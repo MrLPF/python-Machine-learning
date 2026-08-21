@@ -1,6 +1,6 @@
 # ForgeRL v2 implementation roadmap
 
-## M0 — baseline and correctness gates (this PR)
+## M0 — baseline and correctness gates
 
 - [x] Package the uploaded source without bytecode artifacts.
 - [x] Remove import-time dependency on the proprietary simulator.
@@ -10,20 +10,24 @@
 - [x] Add unit tests for trajectory identity and runtime contracts.
 - [x] Add a two-process CPU DDP smoke test.
 
-**Go gate:** zero missing/duplicate step IDs in deterministic collector tests; all CPU CI jobs pass.
+**Go gate:** zero missing/duplicate step IDs in deterministic collector tests; all CPU CI jobs
+pass. **Status: passed.**
 
 ## M1 — local high-throughput runtime
 
 - [x] Shared-memory tensor arena.
 - [x] Deadline/minimum-size inference batching contract.
 - [x] Bounded on-policy queue and policy registry.
-- [ ] Replace pickle payloads with shared-memory slot descriptors end-to-end.
-- [ ] Add double-buffered node-local inference replicas.
-- [ ] Add vectorized C++ environment ABI and one reference implementation.
-- [ ] Add pinned-memory/non-blocking H2D pipeline and AMP inference.
+- [x] Replace tensor payload pickling with generation-safe shared-memory slot descriptors.
+- [x] Add double-buffered node-local inference replicas.
+- [x] Add vectorized C++ environment ABI and deterministic reference implementation.
+- [x] Add pinned-memory/non-blocking H2D and AMP inference paths.
+- [x] Add lossless trajectory fragmentation with bootstrap state stored separately.
+- [ ] Run a frozen v1-versus-v2 throughput and time-to-target benchmark on matching hardware.
 
 **Go gate:** at least 2x valid-transition throughput over v1 on the synthetic benchmark without
-more than 5% degradation in time-to-target on CartPole/Pendulum.
+more than 5% degradation in time-to-target on CartPole/Pendulum. **Status: implementation ready;
+benchmark decision pending.**
 
 ## M2 — multi-node learner and control plane
 

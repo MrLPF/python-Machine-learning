@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 
@@ -144,6 +144,51 @@ class TransitionBatch:
                 raise TransitionIdentityError(
                     "duplicate valid transition identity (actor, env, episode, step)"
                 )
+
+    @classmethod
+    def concat(cls, batches: Sequence["TransitionBatch"]) -> "TransitionBatch":
+        """Concatenate validated batches while preserving tensor-tree structure."""
+        if not batches:
+            raise ValueError("batches must not be empty")
+
+        def concat_tree(name: str) -> dict[str, np.ndarray] | None:
+            trees = [getattr(batch, name) for batch in batches]
+            if all(tree is None for tree in trees):
+                return None
+            if any(tree is None for tree in trees):
+                raise ValueError(f"{name} is missing from some batches")
+            present = [tree for tree in trees if tree is not None]
+            keys = set(present[0])
+            if any(set(tree) != keys for tree in present):
+                raise ValueError(f"{name} keys differ across batches")
+            return {
+                key: np.concatenate([tree[key] for tree in present], axis=0)
+                for key in sorted(keys)
+            }
+
+        kwargs: dict[str, Any] = {
+            "obs": concat_tree("obs") or {},
+            "next_obs": concat_tree("next_obs") or {},
+            "action": concat_tree("action") or {},
+            "hidden_in": concat_tree("hidden_in"),
+            "hidden_out": concat_tree("hidden_out"),
+            "extras": concat_tree("extras") or {},
+        }
+        for name in (
+            "reward",
+            "terminated",
+            "truncated",
+            "valid_mask",
+            "behavior_log_prob",
+            "behavior_value",
+            "policy_version",
+            "episode_id",
+            "step_id",
+            "actor_id",
+            "env_id",
+        ):
+            kwargs[name] = np.concatenate([getattr(batch, name) for batch in batches], axis=0)
+        return cls(**kwargs)
 
     def select(self, indices: np.ndarray | list[int]) -> "TransitionBatch":
         index = np.asarray(indices, dtype=np.int64)

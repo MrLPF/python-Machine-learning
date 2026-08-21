@@ -43,6 +43,12 @@ jobs:
       - name: Runtime microbenchmark
         working-directory: ForgeRL
         run: python scripts/benchmark_runtime.py --items 20000 --width 64 --slots 32
+      - name: M1 shared inference microbenchmark
+        working-directory: ForgeRL
+        run: |
+          python scripts/benchmark_m1_inference.py \
+            --actors 2 --requests-per-actor 25 --items-per-request 4 \
+            --width 16 --max-batch-items 16 --min-batch-items 8
 
   distributed:
     runs-on: ubuntu-latest
