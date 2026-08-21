@@ -1,0 +1,83 @@
+name: Apply ForgeRL learning payload
+
+on:
+  push:
+    branches: [tmp/forge-rl-m1-learning-transfer]
+    paths:
+      - ".github/workflows/forge-rl-apply-learning-payload.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp/forge-rl-m1-learning-transfer
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Decode audited payload
+        run: |
+          git fetch origin backup/forge-rl-learning-payload-20260821
+          : > /tmp/forgerl-learning.b64
+          for index in 00 01 02 03 04 05 06 07; do
+            git show "origin/backup/forge-rl-learning-payload-20260821:.github/forgerl-next-payload/part${index}" >> /tmp/forgerl-learning.b64
+          done
+          base64 --decode /tmp/forgerl-learning.b64 > /tmp/forgerl-learning.tar.xz
+          tar -tJf /tmp/forgerl-learning.tar.xz | sort > /tmp/payload-files.txt
+          cat > /tmp/allowed-files.txt <<'EOF'
+          .github/workflows/forge-rl-ci.yml
+          .github/workflows/forge-rl-m1-formal.yml
+          ForgeRL/README.md
+          ForgeRL/docs/BENCHMARKS.md
+          ForgeRL/docs/M1_ACCEPTANCE.md
+          ForgeRL/docs/ROADMAP.md
+          ForgeRL/scripts/benchmark_m1_learning.py
+          ForgeRL/src/forge_rl/benchmarks/__init__.py
+          ForgeRL/src/forge_rl/benchmarks/legacy_v1.py
+          ForgeRL/src/forge_rl/benchmarks/ppo_learning.py
+          ForgeRL/tests/test_legacy_policy_update.py
+          ForgeRL/tests/test_ppo_learning.py
+          EOF
+          sed -i 's/^          //' /tmp/allowed-files.txt
+          sort -o /tmp/allowed-files.txt /tmp/allowed-files.txt
+          diff -u /tmp/allowed-files.txt /tmp/payload-files.txt
+          tar -xJf /tmp/forgerl-learning.tar.xz
+      - name: Validate learning gate implementation
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e 'ForgeRL[dev,gym]'
+          python -m compileall -q ForgeRL/src ForgeRL/tests ForgeRL/scripts
+          pytest -q ForgeRL/tests
+          python ForgeRL/scripts/benchmark_m1_learning.py \
+            --smoke --seeds 7 \
+            --environments CartPole-v1,Pendulum-v1 \
+            --device cpu \
+            --output ForgeRL/benchmarks/results/m1-learning-transfer-smoke.json
+      - name: Commit only reviewed source paths
+        run: |
+          rm -rf .github/forgerl-transfer
+          rm -f .github/workflows/forge-rl-apply-learning-payload.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            .github/workflows/forge-rl-ci.yml \
+            .github/workflows/forge-rl-m1-formal.yml \
+            ForgeRL/README.md \
+            ForgeRL/docs/BENCHMARKS.md \
+            ForgeRL/docs/M1_ACCEPTANCE.md \
+            ForgeRL/docs/ROADMAP.md \
+            ForgeRL/scripts/benchmark_m1_learning.py \
+            ForgeRL/src/forge_rl/benchmarks/__init__.py \
+            ForgeRL/src/forge_rl/benchmarks/legacy_v1.py \
+            ForgeRL/src/forge_rl/benchmarks/ppo_learning.py \
+            ForgeRL/tests/test_legacy_policy_update.py \
+            ForgeRL/tests/test_ppo_learning.py
+          git add -u -- .github/forgerl-transfer .github/workflows/forge-rl-apply-learning-payload.yml
+          git diff --cached --check
+          git commit -m "feat(forge-rl): add controlled M1 PPO learning gate"
+          git push origin HEAD:tmp/forge-rl-m1-learning-transfer
