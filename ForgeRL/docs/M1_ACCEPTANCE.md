@@ -27,29 +27,31 @@ inference transport being measured.
 
 ## Current v2 local inference subject
 
-The default `NodeLocalInferenceService` remains the v2 subject used by the synthetic and learning
-gates. Its M1 hot path now has three bounded optimizations:
+The default v2 subject now routes compact request descriptors through one node-level event-driven
+queue. Request and response tensors remain in generation-protected shared-memory slots. The first
+notification blocks the collector; subsequent ready descriptors are drained in a bounded burst.
+This replaces the previous endpoint-by-endpoint empty-poll loop while retaining exactly one
+collector and one inference worker.
 
-1. one fair round-robin collector services every actor request endpoint instead of starting one
-   receiver thread per actor;
-2. `max_drain_per_endpoint` limits the number of descriptors consumed from one endpoint before
-   advancing, preventing a hot actor from starving peers;
-3. a one-request batch remains a direct shared-memory view, while multi-request batches copy into
-   schema-keyed preallocated buffers that are reused until the schema changes.
+The prior implementations remain available only for regression comparison:
 
-The previous per-actor-thread service is retained as `ThreadedNodeLocalInferenceService` for
-regression comparison only. `benchmark_m1_inference.py` reports collector polls, empty polls,
-assembly allocations, assembly copied bytes, reused-buffer batches and single-request zero-copy
-batches. These counters diagnose the implementation; they are not substitutes for the formal
-valid-row throughput result.
+```text
+PollingNodeLocalInferenceService
+ThreadedNodeLocalInferenceService
+```
+
+The event-driven queue is validated from normal Actor threads and from a spawned Actor process.
+Stale descriptors are counted and ignored; an unknown Actor or Actor-metadata mismatch is treated
+as an explicit runtime protocol error rather than a valid transition.
 
 ## Synthetic acceptance benchmark
 
 `benchmark_m1_acceptance.py` executes the same deterministic PyTorch model, observations, request
-identities, actor count, device and precision through:
+identities, Actor count, device and precision through:
 
 1. `LegacyV1InferenceRuntime`, using the frozen Queue/pickle path;
-2. `NodeLocalInferenceService`, using shared-memory tensor channels and cross-actor batching.
+2. the default event-driven `NodeLocalInferenceService`, using shared-memory tensor channels and
+   cross-Actor batching.
 
 It reports valid rows/s, v2/v1 speedup, transition identity errors, output equivalence,
 p50/p95/p99 latency, batch fill, data-movement counters and the software/hardware fingerprint.
@@ -81,11 +83,51 @@ Hosted-runner measurements are regression signals only. The formal result must b
 pinned image with fixed CPU affinity, thread counts, PyTorch/Gymnasium versions and power settings.
 Both subjects use the same device and precision.
 
+## Controlled tuning before C++ escalation
+
+The event-driven path must be measured across the documented workload matrix before implementing a
+custom C++ queue. A CI smoke validates the matrix runner and JSON schema but is never formal:
+
+```bash
+python scripts/benchmark_m1_tuning_matrix.py \
+  --preset smoke --repeats 1 --warmup-repeats 0 \
+  --requests-per-actor 8 \
+  --output benchmarks/results/m1-tuning-matrix-smoke.json
+```
+
+The pinned screening command is:
+
+```bash
+taskset -c "$FORGERL_CPUSET" \
+  python scripts/benchmark_m1_tuning_matrix.py \
+    --preset controlled --controlled \
+    --repeats 3 --warmup-repeats 1 \
+    --requests-per-actor 1000 \
+    --output benchmarks/results/m1-tuning-matrix-controlled.json
+```
+
+Each case runs the complete v1/v2 correctness and numerical-equivalence checks. A stable
+`>=2.0x` case with speedup coefficient of variation `<=0.10` becomes a candidate for the fixed
+formal gate; it does not itself produce `GO`.
+
+A C++ atomic descriptor ring is the next M1 experiment only when all of these conditions hold:
+
+```text
+controlled pinned run
+at least three measured repeats per case
+all transition and numerical gates pass
+all cases with actors >= 8 have median v2/v1 speedup < 1.0
+matrix status == CPP_DESCRIPTOR_RING_RECOMMENDED
+```
+
+Otherwise the project continues tuning the Python event-driven path. This stop/go rule prevents a
+C++ rewrite based on a noisy hosted-runner result or one undersized workload.
+
 ## Learning-quality gate
 
 `benchmark_m1_learning.py` supplies the executable evidence generator. It uses one
 `ReferencePPOPolicy`, one PPO loss implementation, identical initial weights, identical GAE,
-identical minibatch order, identical rollout budget and deterministic per-actor action RNGs for
+identical minibatch order, identical rollout budget and deterministic per-Actor action RNGs for
 both subjects. The intentional difference is only the inference data plane.
 
 Supported reference environments are:

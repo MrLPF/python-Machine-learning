@@ -65,7 +65,7 @@ criterion. Normal hosted CI runs a tiny plumbing smoke only and is never formal 
 - policy-lag and queue-age percentiles;
 - learner rows/s, GPU utilization, CPU utilization and memory peaks;
 - serialization bytes, shared-memory bytes and network bytes;
-- collector thread count, polls and empty-poll ratio;
+- collector waits, notification batches and stale/invalid descriptor counts;
 - input-assembly allocations, copied bytes, reused-buffer batches and zero-copy batches;
 - strong/weak scaling efficiency;
 - time-to-target and learning-curve AUC over at least five seeds;
@@ -73,20 +73,69 @@ criterion. Normal hosted CI runs a tiny plumbing smoke only and is never formal 
 
 ## M1 local inference implementation controls
 
-The default v2 inference service uses one fair round-robin collector for all actor endpoints.
-`max_drain_per_endpoint` bounds how many descriptors one endpoint may contribute before the
-collector advances, preventing a hot actor from starving the others. The previous one-thread-per-
-endpoint service remains exported as `ThreadedNodeLocalInferenceService` only for controlled
-regression comparison.
+The default v2 inference service uses one node-level event-driven ready-descriptor queue. Actor
+request tensor payloads stay in their generation-protected shared-memory slots; only a compact
+`(actor_id, SlotMessage)` notification enters the shared queue. The collector blocks for the first
+notification and drains an explicitly bounded burst, eliminating endpoint-by-endpoint empty polls.
+
+The previous implementations remain available as controlled regression subjects:
+
+```text
+NodeLocalInferenceService          event-driven shared descriptor queue (default)
+PollingNodeLocalInferenceService   one round-robin collector polling endpoint queues
+ThreadedNodeLocalInferenceService  one receiver thread per Actor endpoint
+```
 
 One-request batches are passed directly from the request shared-memory slot to the PyTorch CPU
 tensor view. Multi-request batches use schema-keyed, preallocated contiguous buffers that are
 reused until the input schema changes. This removes repeated `np.concatenate` allocations while
 preserving the copy required to combine physically separate slots.
 
-`benchmark_m1_inference.py` reports both the standard service metrics and the optimization
-counters. These counters explain where time and memory traffic go; they do not replace the formal
-v1/v2 valid-row throughput gate.
+`benchmark_m1_inference.py --service-mode event|polling|threaded` reports the standard service
+metrics plus implementation-specific counters. These diagnostics explain where time and memory
+traffic go; they do not replace the formal v1/v2 valid-row throughput gate.
+
+## Controlled M1 tuning matrix
+
+`benchmark_m1_tuning_matrix.py` evaluates the documented Actor-count, request-size, batch-capacity,
+minimum-batch and deadline combinations through the same `run_m1_acceptance` implementation used
+by the formal gate. Every trial includes transition identity and numerical-equivalence checks.
+
+Hosted CI runs only the nonformal smoke matrix:
+
+```bash
+python scripts/benchmark_m1_tuning_matrix.py \
+  --preset smoke --repeats 1 --warmup-repeats 0 \
+  --requests-per-actor 8 \
+  --output benchmarks/results/m1-tuning-matrix-smoke.json
+```
+
+The controlled pinned-hardware matrix is:
+
+```bash
+taskset -c "$FORGERL_CPUSET" \
+  python scripts/benchmark_m1_tuning_matrix.py \
+    --preset controlled --controlled \
+    --repeats 3 --warmup-repeats 1 \
+    --requests-per-actor 1000 \
+    --output benchmarks/results/m1-tuning-matrix-controlled.json
+```
+
+Its status is interpreted as follows:
+
+| Status | Meaning |
+|---|---|
+| `FAIL_CORRECTNESS` | at least one case lost, duplicated or corrupted data |
+| `SCREENING_ONLY` | unpinned/hosted result; no architecture decision is allowed |
+| `INSUFFICIENT_REPEATS` | controlled run has fewer than three repeats |
+| `INSUFFICIENT_TARGET_CASES` | controlled matrix has no case with at least eight Actors |
+| `CANDIDATE_FOR_FORMAL_M1` | stable best case reaches `>=2.0x` with speedup CV `<=0.10` |
+| `CONTINUE_PYTHON_TUNING` | no stable 2x case, but evidence does not justify C++ yet |
+| `CPP_DESCRIPTOR_RING_RECOMMENDED` | every controlled case with at least eight Actors remains below `1.0x` |
+
+The last status authorizes a C++ atomic descriptor-ring implementation as the next M1 experiment;
+it is not a performance acceptance result. A matrix candidate must still pass the fixed formal M1
+command and the complete learning-quality gate.
 
 ## Formal M1 fairness controls
 

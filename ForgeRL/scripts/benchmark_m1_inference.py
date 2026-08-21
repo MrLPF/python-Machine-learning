@@ -14,8 +14,10 @@ from forge_rl.runtime import (
     DoubleBufferedPolicyReplica,
     NodeLocalInferenceService,
     PolicyRegistry,
+    PollingNodeLocalInferenceService,
     SharedInferenceClient,
     SharedInferenceEndpoint,
+    ThreadedNodeLocalInferenceService,
 )
 
 
@@ -46,8 +48,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-batch-items", type=int, default=128)
     parser.add_argument("--min-batch-items", type=int, default=32)
     parser.add_argument("--max-wait-ms", type=float, default=2.0)
-    parser.add_argument("--collector-poll-ms", type=float, default=0.25)
-    parser.add_argument("--max-drain-per-endpoint", type=int, default=4)
+    parser.add_argument(
+        "--service-mode",
+        choices=("event", "polling", "threaded"),
+        default="event",
+    )
     return parser.parse_args()
 
 
@@ -70,15 +75,18 @@ def main() -> None:
     source = factory()
     registry = PolicyRegistry(history_size=2)
     snapshot = registry.publish(source.state_dict(), version=0)
-    service = NodeLocalInferenceService(
+    service_class = {
+        "event": NodeLocalInferenceService,
+        "polling": PollingNodeLocalInferenceService,
+        "threaded": ThreadedNodeLocalInferenceService,
+    }[args.service_mode]
+    service = service_class(
         endpoints=endpoints,
         replica=DoubleBufferedPolicyReplica(factory, device="cpu"),
         infer_fn=run_policy,
         max_batch_items=args.max_batch_items,
         min_batch_items=args.min_batch_items,
         max_wait_ms=args.max_wait_ms,
-        collector_poll_ms=args.collector_poll_ms,
-        max_drain_per_endpoint=args.max_drain_per_endpoint,
     )
     service.refresh_policy(snapshot)
     service.start()
@@ -100,17 +108,20 @@ def main() -> None:
     elapsed = time.perf_counter() - started
     service.stop()
     metrics = service.metrics()
-    optimization = service.optimization_metrics()
     total_items = args.actors * args.requests_per_actor * args.items_per_request
     report = {
+        "service_mode": args.service_mode,
         "actors": args.actors,
         "requests": args.actors * args.requests_per_actor,
         "items": total_items,
         "elapsed_seconds": elapsed,
         "items_per_second": total_items / elapsed,
         "service": asdict(metrics),
-        "optimization": asdict(optimization),
     }
+    if hasattr(service, "optimization_metrics"):
+        report["optimization"] = asdict(service.optimization_metrics())
+    if hasattr(service, "event_metrics"):
+        report["event_driven"] = asdict(service.event_metrics())
     print(json.dumps(report, indent=2, sort_keys=True))
     for endpoint in endpoints:
         endpoint.shutdown()

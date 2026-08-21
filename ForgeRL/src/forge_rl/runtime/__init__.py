@@ -2,18 +2,22 @@
 
 from .coordinator import InMemoryCoordinator, NodeLease, NodeRole
 from .dynamic_batcher import BatchEnvelope, DeadlineBatcher
+from .event_driven_inference import (
+    EventDrivenInferenceMetricsSnapshot,
+    NodeLocalInferenceService,
+)
 from .experience import ExperienceItem, OnPolicyExperienceQueue
 from .inference import (
     DoubleBufferedPolicyReplica,
     InferenceMetricsSnapshot,
     InferenceResponse,
-    NodeLocalInferenceService as ThreadedNodeLocalInferenceService,
     SharedInferenceClient,
     SharedInferenceEndpoint,
 )
 from .optimized_inference import (
-    NodeLocalInferenceService,
+    NodeLocalInferenceService as PollingNodeLocalInferenceService,
     OptimizedInferenceMetricsSnapshot,
+    ThreadedNodeLocalInferenceService,
 )
 from .policy_registry import PolicyRegistry, PolicySnapshot
 from .trajectory import TrajectoryBuilder, TrajectoryFragment
@@ -23,6 +27,7 @@ __all__ = [
     "BatchEnvelope",
     "DeadlineBatcher",
     "DoubleBufferedPolicyReplica",
+    "EventDrivenInferenceMetricsSnapshot",
     "ExperienceItem",
     "InferenceMetricsSnapshot",
     "InferenceResponse",
@@ -34,6 +39,7 @@ __all__ = [
     "OptimizedInferenceMetricsSnapshot",
     "PolicyRegistry",
     "PolicySnapshot",
+    "PollingNodeLocalInferenceService",
     "SharedInferenceClient",
     "SharedInferenceEndpoint",
     "ThreadedNodeLocalInferenceService",

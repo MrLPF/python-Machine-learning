@@ -27,9 +27,12 @@
 - [x] Add deterministic transition, policy-version, time-to-target and normalized-AUC evidence.
 - [x] Add a normal-CI learning plumbing smoke that cannot produce a formal `GO`.
 - [x] Add a pinned self-hosted workflow for the formal five-seed learning and final M1 gates.
-- [x] Replace per-actor receiver threads with one fair node-local endpoint collector.
+- [x] Replace per-actor receiver threads with one node-local collector.
 - [x] Reuse preallocated multi-request assembly buffers and keep one-request batches zero-copy.
 - [x] Expose collector, allocation and copy-volume counters for performance diagnosis.
+- [x] Replace endpoint-by-endpoint empty polling with one event-driven shared ready-descriptor queue.
+- [x] Validate the shared notification path from both threads and spawned Actor processes.
+- [x] Add a controlled actor/request/batch tuning matrix with explicit Python-vs-C++ stop/go states.
 - [ ] Run the controlled >=2x valid-row throughput gate on pinned hardware.
 - [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
 - [ ] Persist an `m1-final.json` report whose status is `GO`.
@@ -40,9 +43,16 @@ reaching its environment target, and no more than 5% degradation in time-to-targ
 learning AUC on CartPole/Pendulum. CI smoke success alone is not M1 acceptance. The persisted final
 report must have status `GO`.
 
-The optimized local inference path reduces Python thread count and batch-allocation churn, but an
-implementation change is not acceptance evidence. Until the two unchecked runs above complete on
-the documented pinned runner, M1 remains **not performance accepted**.
+The default Python runtime now uses a node-level ready-descriptor queue rather than polling every
+Actor endpoint. The previous polling and per-Actor-thread implementations remain available only as
+regression subjects. This implementation change and the tuning-matrix script are not acceptance
+evidence. Until the two unchecked runs above complete on the documented pinned runner, M1 remains
+**not performance accepted**.
+
+A C++ atomic descriptor ring is conditional work, not an automatic next milestone. It is justified
+only when a controlled matrix with at least three repeats shows that every eight-or-more-Actor case
+remains below `1.0x` v1 throughput while all correctness gates pass. Otherwise continue tuning the
+Python event-driven path and batch configuration.
 
 ## M2 — multi-node learner and control plane
 
