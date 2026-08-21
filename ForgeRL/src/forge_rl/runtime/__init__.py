@@ -7,9 +7,13 @@ from .inference import (
     DoubleBufferedPolicyReplica,
     InferenceMetricsSnapshot,
     InferenceResponse,
-    NodeLocalInferenceService,
+    NodeLocalInferenceService as ThreadedNodeLocalInferenceService,
     SharedInferenceClient,
     SharedInferenceEndpoint,
+)
+from .optimized_inference import (
+    NodeLocalInferenceService,
+    OptimizedInferenceMetricsSnapshot,
 )
 from .policy_registry import PolicyRegistry, PolicySnapshot
 from .trajectory import TrajectoryBuilder, TrajectoryFragment
@@ -27,10 +31,12 @@ __all__ = [
     "NodeLocalInferenceService",
     "NodeRole",
     "OnPolicyExperienceQueue",
+    "OptimizedInferenceMetricsSnapshot",
     "PolicyRegistry",
     "PolicySnapshot",
     "SharedInferenceClient",
     "SharedInferenceEndpoint",
+    "ThreadedNodeLocalInferenceService",
     "TrajectoryBuilder",
     "TrajectoryFragment",
     "TransitionBatch",

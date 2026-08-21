@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict
 import json
 import time
 
@@ -46,6 +46,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-batch-items", type=int, default=128)
     parser.add_argument("--min-batch-items", type=int, default=32)
     parser.add_argument("--max-wait-ms", type=float, default=2.0)
+    parser.add_argument("--collector-poll-ms", type=float, default=0.25)
+    parser.add_argument("--max-drain-per-endpoint", type=int, default=4)
     return parser.parse_args()
 
 
@@ -75,6 +77,8 @@ def main() -> None:
         max_batch_items=args.max_batch_items,
         min_batch_items=args.min_batch_items,
         max_wait_ms=args.max_wait_ms,
+        collector_poll_ms=args.collector_poll_ms,
+        max_drain_per_endpoint=args.max_drain_per_endpoint,
     )
     service.refresh_policy(snapshot)
     service.start()
@@ -96,6 +100,7 @@ def main() -> None:
     elapsed = time.perf_counter() - started
     service.stop()
     metrics = service.metrics()
+    optimization = service.optimization_metrics()
     total_items = args.actors * args.requests_per_actor * args.items_per_request
     report = {
         "actors": args.actors,
@@ -104,6 +109,7 @@ def main() -> None:
         "elapsed_seconds": elapsed,
         "items_per_second": total_items / elapsed,
         "service": asdict(metrics),
+        "optimization": asdict(optimization),
     }
     print(json.dumps(report, indent=2, sort_keys=True))
     for endpoint in endpoints:

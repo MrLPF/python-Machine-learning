@@ -20,10 +20,28 @@ actor NumPy payload
 Simulator-specific and domain adapters are intentionally excluded. The manifest records the
 archive and relevant source-file SHA-256 digests so the baseline cannot be silently changed.
 
-For the learning gate, the frozen data plane now accepts an atomic policy-update control message.
-The update is acknowledged only after a complete state dict has loaded between rollout rounds.
-This is required to train v1 and v2 with the same PPO core; it does not change the frozen
-Queue/pickle inference transport being measured.
+For the learning gate, the frozen data plane accepts an atomic policy-update control message. The
+update is acknowledged only after a complete state dict has loaded between rollout rounds. This is
+required to train v1 and v2 with the same PPO core; it does not change the frozen Queue/pickle
+inference transport being measured.
+
+## Current v2 local inference subject
+
+The default `NodeLocalInferenceService` remains the v2 subject used by the synthetic and learning
+gates. Its M1 hot path now has three bounded optimizations:
+
+1. one fair round-robin collector services every actor request endpoint instead of starting one
+   receiver thread per actor;
+2. `max_drain_per_endpoint` limits the number of descriptors consumed from one endpoint before
+   advancing, preventing a hot actor from starving peers;
+3. a one-request batch remains a direct shared-memory view, while multi-request batches copy into
+   schema-keyed preallocated buffers that are reused until the schema changes.
+
+The previous per-actor-thread service is retained as `ThreadedNodeLocalInferenceService` for
+regression comparison only. `benchmark_m1_inference.py` reports collector polls, empty polls,
+assembly allocations, assembly copied bytes, reused-buffer batches and single-request zero-copy
+batches. These counters diagnose the implementation; they are not substitutes for the formal
+valid-row throughput result.
 
 ## Synthetic acceptance benchmark
 
@@ -65,8 +83,8 @@ Both subjects use the same device and precision.
 
 ## Learning-quality gate
 
-`benchmark_m1_learning.py` supplies the previously missing executable evidence generator. It uses
-one `ReferencePPOPolicy`, one PPO loss implementation, identical initial weights, identical GAE,
+`benchmark_m1_learning.py` supplies the executable evidence generator. It uses one
+`ReferencePPOPolicy`, one PPO loss implementation, identical initial weights, identical GAE,
 identical minibatch order, identical rollout budget and deterministic per-actor action RNGs for
 both subjects. The intentional difference is only the inference data plane.
 
@@ -125,7 +143,7 @@ v2 median normalized AUC >= 0.95 * v1 median normalized AUC
 transition and policy-version audits pass for every run
 ```
 
-The JSON keeps the six compatibility fields consumed by `LearningGate`, plus detailed target-reach
+The JSON keeps the compatibility fields consumed by `LearningGate`, plus detailed target-reach
 counts and per-seed evidence. A failed or censored seed is not presented as a successful
 time-to-target observation.
 

@@ -65,9 +65,28 @@ criterion. Normal hosted CI runs a tiny plumbing smoke only and is never formal 
 - policy-lag and queue-age percentiles;
 - learner rows/s, GPU utilization, CPU utilization and memory peaks;
 - serialization bytes, shared-memory bytes and network bytes;
+- collector thread count, polls and empty-poll ratio;
+- input-assembly allocations, copied bytes, reused-buffer batches and zero-copy batches;
 - strong/weak scaling efficiency;
 - time-to-target and learning-curve AUC over at least five seeds;
 - total resource cost to target.
+
+## M1 local inference implementation controls
+
+The default v2 inference service uses one fair round-robin collector for all actor endpoints.
+`max_drain_per_endpoint` bounds how many descriptors one endpoint may contribute before the
+collector advances, preventing a hot actor from starving the others. The previous one-thread-per-
+endpoint service remains exported as `ThreadedNodeLocalInferenceService` only for controlled
+regression comparison.
+
+One-request batches are passed directly from the request shared-memory slot to the PyTorch CPU
+tensor view. Multi-request batches use schema-keyed, preallocated contiguous buffers that are
+reused until the input schema changes. This removes repeated `np.concatenate` allocations while
+preserving the copy required to combine physically separate slots.
+
+`benchmark_m1_inference.py` reports both the standard service metrics and the optimization
+counters. These counters explain where time and memory traffic go; they do not replace the formal
+v1/v2 valid-row throughput gate.
 
 ## Formal M1 fairness controls
 

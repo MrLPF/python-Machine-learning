@@ -27,6 +27,9 @@
 - [x] Add deterministic transition, policy-version, time-to-target and normalized-AUC evidence.
 - [x] Add a normal-CI learning plumbing smoke that cannot produce a formal `GO`.
 - [x] Add a pinned self-hosted workflow for the formal five-seed learning and final M1 gates.
+- [x] Replace per-actor receiver threads with one fair node-local endpoint collector.
+- [x] Reuse preallocated multi-request assembly buffers and keep one-request batches zero-copy.
+- [x] Expose collector, allocation and copy-volume counters for performance diagnosis.
 - [ ] Run the controlled >=2x valid-row throughput gate on pinned hardware.
 - [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
 - [ ] Persist an `m1-final.json` report whose status is `GO`.
@@ -37,8 +40,9 @@ reaching its environment target, and no more than 5% degradation in time-to-targ
 learning AUC on CartPole/Pendulum. CI smoke success alone is not M1 acceptance. The persisted final
 report must have status `GO`.
 
-The implementation of a gate is not evidence that the gate passed. Until the two unchecked runs
-above complete on the documented pinned runner, M1 remains **not performance accepted**.
+The optimized local inference path reduces Python thread count and batch-allocation churn, but an
+implementation change is not acceptance evidence. Until the two unchecked runs above complete on
+the documented pinned runner, M1 remains **not performance accepted**.
 
 ## M2 — multi-node learner and control plane
 
