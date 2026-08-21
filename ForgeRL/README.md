@@ -35,10 +35,13 @@ intentionally **not** a replacement for PyTorch or OneFlow's tensor/autograd lay
 - optional pinned-memory, non-blocking H2D and AMP inference path;
 - `TrajectoryBuilder` with separate bootstrap state and no lost final transition;
 - stable C ABI for vectorized C++ environments;
-- deterministic C++ counter-environment reference implementation.
+- deterministic C++ counter-environment reference implementation;
+- source-fingerprinted v1 Queue/pickle predictor reference;
+- same-model v1/v2 transition audit and acceptance-report generator.
 
-M1 code is implemented, but the performance go gate remains open until it is benchmarked against
-the frozen v1 implementation on matching hardware and time-to-target tests.
+M1 code is implemented, but the performance gate remains open until the controlled >=2x
+valid-row benchmark and five-seed CartPole/Pendulum learning gate both pass. A green CI smoke run
+is not an M1 `GO` decision.
 
 ## Quick start
 
@@ -50,6 +53,10 @@ pytest -q
 python scripts/benchmark_env.py --env CartPole-v1 --steps 10000
 python scripts/benchmark_runtime.py --items 200000
 python scripts/benchmark_m1_inference.py --actors 4 --requests-per-actor 1000
+python scripts/benchmark_m1_acceptance.py \
+  --actors 2 --requests-per-actor 8 --items-per-request 2 \
+  --width 16 --max-batch-items 8 --v2-min-batch-items 4 \
+  --throughput-gate 0
 ```
 
 ## Initial benchmark environments
@@ -64,6 +71,6 @@ The C++ counter environment is a runtime/ABI benchmark, not a learning-quality b
 ## Repository status
 
 Acceptance gates and remaining work are tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md). The
-benchmark methodology is defined in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md). The new C++
-environment boundary is documented in
-[`docs/CPP_VECTOR_ENV_ABI.md`](docs/CPP_VECTOR_ENV_ABI.md).
+benchmark methodology is defined in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md), and the exact M1
+procedure is in [`docs/M1_ACCEPTANCE.md`](docs/M1_ACCEPTANCE.md). The C++ environment boundary is
+documented in [`docs/CPP_VECTOR_ENV_ABI.md`](docs/CPP_VECTOR_ENV_ABI.md).

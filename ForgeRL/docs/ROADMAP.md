@@ -10,24 +10,26 @@
 - [x] Add unit tests for trajectory identity and runtime contracts.
 - [x] Add a two-process CPU DDP smoke test.
 
-**Go gate:** zero missing/duplicate step IDs in deterministic collector tests; all CPU CI jobs
-pass. **Status: passed.**
+**Go gate:** zero missing/duplicate step IDs in deterministic collector tests; all CPU CI jobs pass.
 
 ## M1 — local high-throughput runtime
 
 - [x] Shared-memory tensor arena.
 - [x] Deadline/minimum-size inference batching contract.
 - [x] Bounded on-policy queue and policy registry.
-- [x] Replace tensor payload pickling with generation-safe shared-memory slot descriptors.
+- [x] Replace inference tensor payload copies with shared-memory slot descriptors.
 - [x] Add double-buffered node-local inference replicas.
-- [x] Add vectorized C++ environment ABI and deterministic reference implementation.
-- [x] Add pinned-memory/non-blocking H2D and AMP inference paths.
-- [x] Add lossless trajectory fragmentation with bootstrap state stored separately.
-- [ ] Run a frozen v1-versus-v2 throughput and time-to-target benchmark on matching hardware.
+- [x] Add vectorized C++ environment ABI and one reference implementation.
+- [x] Add pinned-memory/non-blocking H2D pipeline and AMP inference.
+- [x] Freeze the uploaded v1 predictor data-plane reference with source hashes.
+- [x] Add same-model v1/v2 transition audit and synthetic acceptance report.
+- [ ] Run the controlled >=2x valid-row throughput gate on pinned hardware.
+- [ ] Run five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
 
-**Go gate:** at least 2x valid-transition throughput over v1 on the synthetic benchmark without
-more than 5% degradation in time-to-target on CartPole/Pendulum. **Status: implementation ready;
-benchmark decision pending.**
+**Go gate:** at least 2x valid-transition throughput over v1 on the controlled synthetic benchmark,
+zero missing/duplicate/invalid rows, numerically equivalent outputs, and no more than 5% degradation
+in time-to-target or normalized learning AUC on CartPole/Pendulum. CI smoke success alone is not
+M1 acceptance. The persisted final report must have status `GO`.
 
 ## M2 — multi-node learner and control plane
 
@@ -40,6 +42,10 @@ benchmark decision pending.**
 
 **Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
 loss, and >=70% weak-scaling efficiency at the target topology.
+
+M2 code may be developed behind isolated interfaces while M1 evidence is collected, but M1 must
+not be marked performance-accepted or merged as such before `docs/M1_ACCEPTANCE.md` produces a
+`GO` report.
 
 ## M3 — algorithms and replay
 

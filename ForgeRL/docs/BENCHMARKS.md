@@ -19,18 +19,26 @@
 5. RLlib or TorchRL collector/LearnerGroup on matching resources.
 
 The model architecture, rollout horizon, total valid transitions, seeds, CPU thread count,
-precision, device type and evaluation episodes must be held constant wherever possible.
+precision, device type and evaluation episodes must be held constant.
+
+The uploaded v1 source fingerprint is stored in `benchmarks/legacy_v1_manifest.json`. The public
+frozen runtime is deliberately limited to the Queue/pickle predictor data path and does not expose
+simulator-specific code. See `docs/M1_ACCEPTANCE.md` for the exact comparison procedure.
 
 ## Correctness gates
 
 ```text
 missing_valid_step_ids == 0
 duplicate_trained_step_ids == 0
+unexpected_trained_step_ids == 0
 invalid_fault_rows_in_loss == 0
 terminated/truncated bootstrap tests pass
 GAE and V-trace match hand-computed references within tolerance
 checkpoint resume preserves policy/optimizer/step versions
 ```
+
+Every benchmark result must include a source commit, environment fingerprint, configuration and
+transition audit. Raw environment steps/s without a useful-sample ratio is not an accepted result.
 
 ## Performance metrics
 
@@ -42,6 +50,23 @@ checkpoint resume preserves policy/optimizer/step versions
 - serialization bytes, shared-memory bytes and network bytes;
 - strong/weak scaling efficiency;
 - time-to-target and learning-curve AUC over at least five seeds.
+
+## M1 gate
+
+M1 requires all of the following:
+
+```text
+transition audit passes
+v1/v2 inference checksum relative error <= 1e-6
+v2 valid-row throughput / v1 valid-row throughput >= 2.0
+CartPole and Pendulum each use at least five seeds
+v2 median time-to-target <= 1.05 * v1
+v2 normalized learning-curve AUC >= 0.95 * v1
+```
+
+The CI acceptance smoke test validates contracts and emits a JSON artifact, but it uses a disabled
+throughput threshold because shared hosted runners are not stable performance hardware. It must
+not be interpreted as an M1 `GO` result.
 
 ## Fault matrix
 

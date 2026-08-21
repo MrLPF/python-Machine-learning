@@ -36,7 +36,7 @@ jobs:
           pip install -e '.[dev]'
       - name: Compile source tree
         working-directory: ForgeRL
-        run: python -m compileall -q src tests
+        run: python -m compileall -q src tests scripts
       - name: Core tests
         working-directory: ForgeRL
         run: pytest -q -m 'not distributed'
@@ -49,6 +49,26 @@ jobs:
           python scripts/benchmark_m1_inference.py \
             --actors 2 --requests-per-actor 25 --items-per-request 4 \
             --width 16 --max-batch-items 16 --min-batch-items 8
+      - name: M1 v1/v2 acceptance correctness smoke
+        if: matrix.python-version == '3.12'
+        working-directory: ForgeRL
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          python scripts/benchmark_m1_acceptance.py \
+            --actors 2 --requests-per-actor 8 --items-per-request 2 \
+            --width 16 --output-size 4 --max-batch-items 8 \
+            --v2-min-batch-items 4 --legacy-min-batch-items 1 \
+            --request-slots 4 --throughput-gate 0 \
+            --output benchmarks/results/m1-acceptance-smoke.json
+      - name: Upload M1 acceptance smoke report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-acceptance-smoke
+          path: ForgeRL/benchmarks/results/m1-acceptance-smoke.json
+          if-no-files-found: error
 
   distributed:
     runs-on: ubuntu-latest
