@@ -1,0 +1,86 @@
+name: ForgeRL CI
+
+on:
+  pull_request:
+    paths:
+      - "ForgeRL/**"
+      - ".github/workflows/forge-rl-ci.yml"
+  push:
+    branches: [master]
+    paths:
+      - "ForgeRL/**"
+      - ".github/workflows/forge-rl-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: ForgeRL/pyproject.toml
+      - name: Install CPU dependencies
+        working-directory: ForgeRL
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e '.[dev]'
+      - name: Compile source tree
+        working-directory: ForgeRL
+        run: python -m compileall -q src tests
+      - name: Core tests
+        working-directory: ForgeRL
+        run: pytest -q -m 'not distributed'
+      - name: Runtime microbenchmark
+        working-directory: ForgeRL
+        run: python scripts/benchmark_runtime.py --items 20000 --width 64 --slots 32
+
+  distributed:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ForgeRL/pyproject.toml
+      - name: Install CPU dependencies
+        working-directory: ForgeRL
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e '.[dev]'
+      - name: Two-process Gloo learner test
+        working-directory: ForgeRL
+        run: pytest -q -m distributed
+
+  gym-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ForgeRL/pyproject.toml
+      - name: Install Gymnasium benchmark dependencies
+        working-directory: ForgeRL
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e '.[dev,gym]'
+      - name: CartPole environment smoke benchmark
+        working-directory: ForgeRL
+        run: python scripts/benchmark_env.py --env CartPole-v1 --envs 8 --steps 5000
+      - name: Pendulum environment smoke benchmark
+        working-directory: ForgeRL
+        run: python scripts/benchmark_env.py --env Pendulum-v1 --envs 8 --steps 5000

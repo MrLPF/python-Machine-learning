@@ -1,0 +1,22 @@
+name: ForgeRL multi-node container smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  two-node-gloo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run two learner containers
+        working-directory: ForgeRL
+        run: |
+          docker compose -f deploy/docker-compose.multinode.yml up \
+            --build --abort-on-container-exit --exit-code-from learner0
+      - name: Tear down
+        if: always()
+        working-directory: ForgeRL
+        run: docker compose -f deploy/docker-compose.multinode.yml down --volumes
