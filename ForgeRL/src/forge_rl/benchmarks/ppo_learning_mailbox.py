@@ -7,13 +7,7 @@ from typing import Mapping
 import numpy as np
 import torch
 
-from forge_rl.runtime import (
-    DoubleBufferedPolicyReplica,
-    FastMailboxInferenceClient,
-    FastMailboxNodeLocalInferenceService,
-    MailboxInferenceEndpoint,
-    PolicyRegistry,
-)
+from forge_rl.runtime import ProcessMailboxInferenceRuntime
 
 from .legacy_v1 import ReferencePPOPolicy, run_synthetic_policy
 from . import ppo_learning as _base
@@ -21,8 +15,8 @@ from . import ppo_learning as _base
 _PATCH_LOCK = threading.Lock()
 
 
-class _MailboxLearningRuntime:
-    """Learning-harness adapter for the fast synchronous mailbox data plane."""
+class _ProcessMailboxLearningRuntime:
+    """Learning-harness adapter for the process-isolated mailbox predictor."""
 
     def __init__(
         self,
@@ -34,28 +28,19 @@ class _MailboxLearningRuntime:
         state_dict: Mapping[str, torch.Tensor],
         config: _base.LearningBenchmarkConfig,
     ) -> None:
-        self.endpoints = [
-            MailboxInferenceEndpoint.create(
-                actor_id=actor_id,
-                max_items=config.envs_per_actor,
-                request_fields={"obs": ((observation_size,), np.float32)},
-                response_fields={
-                    "action": ((action_size,), np.float32),
-                    "value": ((1,), np.float32),
-                },
-            )
-            for actor_id in range(actor_count)
-        ]
-
-        def factory() -> ReferencePPOPolicy:
-            return ReferencePPOPolicy(observation_size, action_size, hidden_size)
-
-        self.registry = PolicyRegistry(history_size=2)
-        snapshot = self.registry.publish(state_dict, version=0)
-        self.service = FastMailboxNodeLocalInferenceService(
-            endpoints=self.endpoints,
-            replica=DoubleBufferedPolicyReplica(factory, device=config.device),
+        self.runtime = ProcessMailboxInferenceRuntime(
+            actor_count=actor_count,
+            max_items=config.envs_per_actor,
+            request_fields={"obs": ((observation_size,), np.float32)},
+            response_fields={
+                "action": ((action_size,), np.float32),
+                "value": ((1,), np.float32),
+            },
+            module_type=ReferencePPOPolicy,
+            module_args=(observation_size, action_size, hidden_size),
             infer_fn=run_synthetic_policy,
+            state_dict=state_dict,
+            policy_version=0,
             max_batch_items=config.max_batch_items,
             min_batch_items=min(
                 config.v2_min_batch_items,
@@ -63,14 +48,10 @@ class _MailboxLearningRuntime:
                 config.max_batch_items,
             ),
             max_wait_ms=config.max_wait_ms,
-            idle_wait_ms=50.0,
+            device=config.device,
+            copy_outputs=False,
         )
-        self.service.refresh_policy(snapshot)
-        self.service.start()
-        self.clients = [
-            FastMailboxInferenceClient(endpoint, copy_outputs=False)
-            for endpoint in self.endpoints
-        ]
+        self.runtime.start()
 
     def infer(
         self,
@@ -79,7 +60,8 @@ class _MailboxLearningRuntime:
         *,
         min_policy_version: int,
     ) -> tuple[dict[str, np.ndarray], int]:
-        response = self.clients[actor_id].infer(
+        response = self.runtime.infer(
+            actor_id,
             {"obs": np.ascontiguousarray(observation, dtype=np.float32)},
             min_policy_version=min_policy_version,
             timeout=30.0,
@@ -87,27 +69,23 @@ class _MailboxLearningRuntime:
         return response.outputs, response.policy_version
 
     def update(self, state_dict: Mapping[str, torch.Tensor], version: int) -> int:
-        snapshot = self.registry.publish(state_dict, version=version)
-        return self.service.refresh_policy(snapshot)
+        return self.runtime.update_policy(
+            state_dict,
+            version=version,
+            timeout=30.0,
+        )
 
     def metrics(self) -> dict[str, float | int | str]:
-        inference = asdict(self.service.metrics())
-        transport = asdict(self.service.transport_metrics())
+        inference, transport = self.runtime.metrics_pair()
         return {
-            **inference,
-            **{f"mailbox_{key}": value for key, value in transport.items()},
-            "runtime": "fast-persistent-synchronous-mailbox",
+            **asdict(inference),
+            **{f"mailbox_{key}": value for key, value in asdict(transport).items()},
+            "runtime": "process-isolated-persistent-mailbox",
+            "predictor_pid": int(self.runtime.process_pid or -1),
         }
 
     def close(self) -> None:
-        try:
-            self.service.stop(timeout=10.0)
-        finally:
-            for client in self.clients:
-                client.close()
-            for endpoint in self.endpoints:
-                endpoint.close()
-                endpoint.unlink()
+        self.runtime.close(timeout=15.0)
 
 
 def run_learning_benchmark(
@@ -115,7 +93,7 @@ def run_learning_benchmark(
 ) -> _base.LearningBenchmarkReport:
     with _PATCH_LOCK:
         previous = _base._SharedLearningRuntime
-        _base._SharedLearningRuntime = _MailboxLearningRuntime
+        _base._SharedLearningRuntime = _ProcessMailboxLearningRuntime
         try:
             return _base.run_learning_benchmark(config)
         finally:

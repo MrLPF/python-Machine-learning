@@ -8,13 +8,7 @@ from typing import Mapping
 import numpy as np
 import torch
 
-from forge_rl.runtime import (
-    DoubleBufferedPolicyReplica,
-    FastMailboxInferenceClient,
-    FastMailboxNodeLocalInferenceService,
-    MailboxInferenceEndpoint,
-    PolicyRegistry,
-)
+from forge_rl.runtime import ProcessMailboxInferenceRuntime
 
 from .audit import audit_transition_identities
 from .legacy_v1 import SyntheticPolicy, run_synthetic_policy
@@ -31,46 +25,33 @@ from .m1_acceptance import (
 )
 
 
-def _run_mailbox_v2(
+def _run_process_mailbox_v2(
     config: M1AcceptanceConfig,
     state: Mapping[str, torch.Tensor],
 ) -> RuntimeReport:
-    endpoints = [
-        MailboxInferenceEndpoint.create(
-            actor_id=actor,
-            max_items=config.items_per_request,
-            request_fields={"obs": ((config.width,), np.float32)},
-            response_fields={
-                "action": ((config.output_size,), np.float32),
-                "value": ((1,), np.float32),
-            },
-        )
-        for actor in range(config.actors)
-    ]
-
-    def factory() -> SyntheticPolicy:
-        return SyntheticPolicy(config.width, config.output_size)
-
-    registry = PolicyRegistry(history_size=2)
-    snapshot = registry.publish(state, version=0)
-    service = FastMailboxNodeLocalInferenceService(
-        endpoints=endpoints,
-        replica=DoubleBufferedPolicyReplica(
-            factory,
-            device=config.device,
-            amp_dtype=None if config.amp_dtype is None else getattr(torch, config.amp_dtype),
-        ),
+    runtime = ProcessMailboxInferenceRuntime(
+        actor_count=config.actors,
+        max_items=config.items_per_request,
+        request_fields={"obs": ((config.width,), np.float32)},
+        response_fields={
+            "action": ((config.output_size,), np.float32),
+            "value": ((1,), np.float32),
+        },
+        module_type=SyntheticPolicy,
+        module_args=(config.width, config.output_size),
         infer_fn=run_synthetic_policy,
+        state_dict=state,
+        policy_version=0,
         max_batch_items=config.max_batch_items,
         min_batch_items=config.v2_min_batch_items,
         max_wait_ms=config.max_wait_ms,
+        device=config.device,
+        amp_dtype=(
+            None if config.amp_dtype is None else getattr(torch, config.amp_dtype)
+        ),
+        copy_outputs=False,
     )
-    service.refresh_policy(snapshot)
-    service.start()
-    clients = [
-        FastMailboxInferenceClient(endpoint, copy_outputs=False)
-        for endpoint in endpoints
-    ]
+    runtime.start()
     collected: list[tuple[int, int, int, int]] = []
     trained: list[tuple[int, int, int, int]] = []
     checksums = [0.0] * config.actors
@@ -82,7 +63,8 @@ def _run_mailbox_v2(
         for sequence in range(config.requests_per_actor):
             observation = _observation(config, actor, sequence)
             collected.extend(_identities(config, actor, sequence))
-            response = clients[actor].infer(
+            response = runtime.infer(
+                actor,
                 {"obs": observation},
                 min_policy_version=0,
                 timeout=15.0,
@@ -100,22 +82,13 @@ def _run_mailbox_v2(
         with ThreadPoolExecutor(max_workers=config.actors) as pool:
             list(pool.map(actor_loop, range(config.actors)))
         elapsed = time.perf_counter() - started
-        metrics = service.metrics()
-        if service.last_error is not None:
-            raise RuntimeError(service.last_error)
+        metrics, _transport = runtime.metrics_pair()
     finally:
-        try:
-            service.stop()
-        finally:
-            for client in clients:
-                client.close()
-            for endpoint in endpoints:
-                endpoint.close()
-                endpoint.unlink()
+        runtime.close()
 
     audit = audit_transition_identities(collected, trained)
     return RuntimeReport(
-        "forge_rl_v2_fast_persistent_mailbox",
+        "forge_rl_v2_process_mailbox",
         elapsed,
         config.actors * config.requests_per_actor,
         config.actors * config.requests_per_actor * config.items_per_request,
@@ -151,7 +124,7 @@ def run_m1_acceptance(
         for name, value in model.state_dict().items()
     }
     legacy = _run_legacy(config, state)
-    v2 = _run_mailbox_v2(config, state)
+    v2 = _run_process_mailbox_v2(config, state)
     speedup = v2.valid_rows_per_second / legacy.valid_rows_per_second
     scale = max(1.0, abs(legacy.output_checksum), abs(v2.output_checksum))
     checksum_error = abs(v2.output_checksum - legacy.output_checksum) / scale
@@ -183,7 +156,7 @@ def run_m1_acceptance(
         config=config,
         environment={
             **_fingerprint(),
-            "v2_runtime": "fast-persistent-synchronous-mailbox",
+            "v2_runtime": "process-isolated-persistent-mailbox",
         },
         legacy=legacy,
         v2=v2,

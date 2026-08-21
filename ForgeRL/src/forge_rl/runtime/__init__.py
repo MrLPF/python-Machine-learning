@@ -31,6 +31,7 @@ from .optimized_inference import (
     ThreadedNodeLocalInferenceService,
 )
 from .policy_registry import PolicyRegistry, PolicySnapshot
+from .process_mailbox_inference import ProcessMailboxInferenceRuntime
 from .trajectory import TrajectoryBuilder, TrajectoryFragment
 from .transition import TransitionBatch, TransitionIdentityError
 
@@ -58,6 +59,7 @@ __all__ = [
     "PolicyRegistry",
     "PolicySnapshot",
     "PollingNodeLocalInferenceService",
+    "ProcessMailboxInferenceRuntime",
     "SharedInferenceClient",
     "SharedInferenceEndpoint",
     "ThreadedNodeLocalInferenceService",
