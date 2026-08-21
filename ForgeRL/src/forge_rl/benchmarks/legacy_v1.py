@@ -19,15 +19,48 @@ LEGACY_V1_ARCHIVE_SHA256 = "ce8e37af749654302d839c098b203563918c58f729cbe7114003
 class SyntheticPolicy(nn.Module):
     def __init__(self, width: int, output_size: int = 4) -> None:
         super().__init__()
-        self.policy = nn.Sequential(nn.Linear(width, width), nn.Tanh(), nn.Linear(width, output_size))
+        self.policy = nn.Sequential(
+            nn.Linear(width, width),
+            nn.Tanh(),
+            nn.Linear(width, output_size),
+        )
         self.value = nn.Linear(width, 1)
 
     def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return self.policy(observation), self.value(observation)
 
 
+class ReferencePPOPolicy(nn.Module):
+    """Small actor-critic used by the controlled CartPole/Pendulum learning gate."""
+
+    def __init__(self, input_size: int, output_size: int, hidden_size: int = 64) -> None:
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+        )
+        self.policy = nn.Linear(hidden_size, output_size)
+        self.value = nn.Linear(hidden_size, 1)
+
+    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        hidden = self.encoder(observation)
+        return self.policy(hidden), self.value(hidden)
+
+
+def _build_policy(
+    model_kind: str, input_size: int, output_size: int, hidden_size: int
+) -> nn.Module:
+    if model_kind == "synthetic":
+        return SyntheticPolicy(input_size, output_size)
+    if model_kind == "reference_ppo":
+        return ReferencePPOPolicy(input_size, output_size, hidden_size)
+    raise ValueError(f"unknown model_kind: {model_kind}")
+
+
 def run_synthetic_policy(
-    module: SyntheticPolicy, batch: Mapping[str, torch.Tensor]
+    module: nn.Module, batch: Mapping[str, torch.Tensor]
 ) -> dict[str, torch.Tensor]:
     action, value = module(batch["obs"])
     return {"action": action, "value": value}
@@ -56,6 +89,18 @@ class _Response:
     error: str = ""
 
 
+@dataclass(slots=True)
+class _PolicyUpdate:
+    version: int
+    state_dict: dict[str, torch.Tensor]
+
+
+@dataclass(slots=True)
+class _PolicyUpdateAck:
+    version: int
+    error: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class LegacyRuntimeMetrics:
     batches: int
@@ -74,11 +119,14 @@ class LegacyRuntimeMetrics:
 def _worker(
     width: int,
     output_size: int,
+    hidden_size: int,
+    model_kind: str,
     state_dict: dict[str, torch.Tensor],
     policy_version: int,
     request_queue: Any,
     response_queues: list[Any],
     metric_queue: Any,
+    control_ack_queue: Any,
     ready: Any,
     max_batch_items: int,
     min_batch_items: int,
@@ -97,17 +145,42 @@ def _worker(
             raise RuntimeError("CUDA legacy baseline requested but CUDA is unavailable")
         torch.cuda.set_device(device)
     amp_dtype = None if amp_dtype_name is None else getattr(torch, amp_dtype_name)
-    model = SyntheticPolicy(width, output_size).to(device)
+    model = _build_policy(model_kind, width, output_size, hidden_size).to(device)
     model.load_state_dict(state_dict)
     model.eval()
-    pending: _Request | None = None
+    active_policy_version = int(policy_version)
+    pending: _Request | _PolicyUpdate | None = None
     ready.set()
     stop = False
+
+    def apply_update(update: _PolicyUpdate) -> None:
+        nonlocal active_policy_version
+        try:
+            if update.version <= active_policy_version:
+                raise ValueError(
+                    f"policy version {update.version} is not newer than {active_policy_version}"
+                )
+            model.load_state_dict(update.state_dict, strict=True)
+            model.eval()
+            active_policy_version = int(update.version)
+            control_ack_queue.put(_PolicyUpdateAck(active_policy_version))
+        except Exception as error:  # pragma: no cover - exercised through parent error path
+            control_ack_queue.put(
+                _PolicyUpdateAck(
+                    int(update.version),
+                    f"{type(error).__name__}: {error}",
+                )
+            )
+
     while not stop:
         first = pending if pending is not None else request_queue.get()
         pending = None
         if first is None:
             return
+        if isinstance(first, _PolicyUpdate):
+            apply_update(first)
+            continue
+
         batch = [first]
         items = first.items
         deadline = time.monotonic() + max_wait_seconds
@@ -123,12 +196,21 @@ def _worker(
             if candidate is None:
                 stop = True
                 break
+            if isinstance(candidate, _PolicyUpdate):
+                pending = candidate
+                break
             if items + candidate.items > max_batch_items:
                 pending = candidate
                 break
             batch.append(candidate)
             items += candidate.items
+
         try:
+            requested_min = max(request.min_policy_version for request in batch)
+            if active_policy_version < requested_min:
+                raise RuntimeError(
+                    f"active policy {active_policy_version} is older than requested {requested_min}"
+                )
             observation = np.concatenate([request.observation for request in batch], axis=0)
             inputs = torch.from_numpy(observation).to(device)
             autocast_enabled = device.type == "cuda" and amp_dtype is not None
@@ -149,7 +231,7 @@ def _worker(
                 response_queues[request.actor_id].put(
                     _Response(
                         request.sequence_id,
-                        policy_version,
+                        active_policy_version,
                         action[offset : offset + count],
                         value[offset : offset + count],
                         completed,
@@ -163,7 +245,7 @@ def _worker(
                 response_queues[request.actor_id].put(
                     _Response(
                         request.sequence_id,
-                        policy_version,
+                        active_policy_version,
                         np.empty((0, output_size), np.float32),
                         np.empty((0, 1), np.float32),
                         completed,
@@ -173,7 +255,12 @@ def _worker(
 
 
 class LegacyV1InferenceRuntime:
-    """Frozen v1 central predictor data plane: Queue/pickle in both directions."""
+    """Frozen v1 central predictor data plane: Queue/pickle in both directions.
+
+    Policy updates share the request control stream and are acknowledged only after the complete
+    state dict has been loaded. Callers update between rollout rounds, so no batch observes a
+    partially loaded policy.
+    """
 
     def __init__(
         self,
@@ -182,6 +269,8 @@ class LegacyV1InferenceRuntime:
         width: int,
         state_dict: Mapping[str, torch.Tensor],
         output_size: int = 4,
+        hidden_size: int = 64,
+        model_kind: str = "synthetic",
         policy_version: int = 0,
         max_batch_items: int = 128,
         min_batch_items: int = 1,
@@ -189,8 +278,12 @@ class LegacyV1InferenceRuntime:
         device: torch.device | str = "cpu",
         amp_dtype: torch.dtype | None = None,
     ) -> None:
-        if actor_count <= 0 or width <= 0 or output_size <= 0:
-            raise ValueError("actor_count, width and output_size must be positive")
+        if actor_count <= 0 or width <= 0 or output_size <= 0 or hidden_size <= 0:
+            raise ValueError(
+                "actor_count, width, output_size and hidden_size must be positive"
+            )
+        if model_kind not in {"synthetic", "reference_ppo"}:
+            raise ValueError("model_kind must be synthetic or reference_ppo")
         if not 1 <= min_batch_items <= max_batch_items:
             raise ValueError("invalid legacy batch limits")
         selected_device = torch.device(device)
@@ -202,13 +295,15 @@ class LegacyV1InferenceRuntime:
             raise ValueError("amp_dtype must be float16, bfloat16 or None")
         if selected_device.type != "cuda" and amp_dtype is not None:
             raise ValueError("AMP baseline is supported only on CUDA")
-        self.actor_count = actor_count
-        self.width = width
-        self.max_batch_items = max_batch_items
+        self.actor_count = int(actor_count)
+        self.width = int(width)
+        self.max_batch_items = int(max_batch_items)
+        self._policy_version = int(policy_version)
         context = mp.get_context("spawn")
         self._requests = context.Queue()
         self._responses = [context.Queue() for _ in range(actor_count)]
         self._batch_metrics = context.Queue()
+        self._control_acks = context.Queue()
         self._ready = context.Event()
         state = {name: value.detach().cpu().clone() for name, value in state_dict.items()}
         self._process = context.Process(
@@ -216,11 +311,14 @@ class LegacyV1InferenceRuntime:
             args=(
                 width,
                 output_size,
+                hidden_size,
+                model_kind,
                 state,
                 policy_version,
                 self._requests,
                 self._responses,
                 self._batch_metrics,
+                self._control_acks,
                 self._ready,
                 max_batch_items,
                 min_batch_items,
@@ -231,6 +329,7 @@ class LegacyV1InferenceRuntime:
             daemon=True,
         )
         self._locks = [threading.Lock() for _ in range(actor_count)]
+        self._control_lock = threading.Lock()
         self._latencies: list[float] = []
         self._request_bytes = 0
         self._response_bytes = 0
@@ -238,12 +337,43 @@ class LegacyV1InferenceRuntime:
         self._metrics_lock = threading.Lock()
         self._started = False
 
+    @property
+    def policy_version(self) -> int:
+        return self._policy_version
+
     def start(self, timeout: float = 15.0) -> None:
         self._process.start()
         if not self._ready.wait(timeout):
             self._process.terminate()
             raise TimeoutError("legacy predictor did not become ready")
         self._started = True
+
+    def update_policy(
+        self,
+        state_dict: Mapping[str, torch.Tensor],
+        *,
+        version: int,
+        timeout: float = 15.0,
+    ) -> int:
+        if not self._started:
+            raise RuntimeError("legacy runtime is not started")
+        selected = int(version)
+        if selected <= self._policy_version:
+            raise ValueError(
+                f"policy version {selected} is not newer than {self._policy_version}"
+            )
+        state = {name: value.detach().cpu().clone() for name, value in state_dict.items()}
+        with self._control_lock:
+            self._requests.put(_PolicyUpdate(selected, state), timeout=timeout)
+            ack: _PolicyUpdateAck = self._control_acks.get(timeout=timeout)
+            if ack.error:
+                raise RuntimeError(ack.error)
+            if ack.version != selected:
+                raise RuntimeError(
+                    f"policy update acknowledgement mismatch: {ack.version} != {selected}"
+                )
+            self._policy_version = selected
+            return selected
 
     def infer(
         self,
@@ -276,7 +406,11 @@ class LegacyV1InferenceRuntime:
                 self._errors += int(bool(response.error))
             if response.error:
                 raise RuntimeError(response.error)
-            return {"action": response.action, "value": response.value}, response.policy_version, response.sequence_id
+            return (
+                {"action": response.action, "value": response.value},
+                response.policy_version,
+                response.sequence_id,
+            )
 
     def metrics(self, expected_requests: int, timeout: float = 2.0) -> LegacyRuntimeMetrics:
         batches: list[tuple[int, int]] = []
@@ -316,7 +450,12 @@ class LegacyV1InferenceRuntime:
             self._process.terminate()
             self._process.join(2.0)
             raise TimeoutError("legacy predictor required forced termination")
-        for queue in [self._requests, *self._responses, self._batch_metrics]:
+        for queue in [
+            self._requests,
+            *self._responses,
+            self._batch_metrics,
+            self._control_acks,
+        ]:
             queue.close()
             queue.join_thread()
         self._started = False
