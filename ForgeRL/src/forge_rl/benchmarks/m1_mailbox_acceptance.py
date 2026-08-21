@@ -41,7 +41,7 @@ def _run_mailbox_v2(
             max_items=config.items_per_request,
             request_fields={"obs": ((config.width,), np.float32)},
             response_fields={
-                "action": ((config.output_size,), np.float32)},
+                "action": ((config.output_size,), np.float32),
                 "value": ((1,), np.float32),
             },
         )
