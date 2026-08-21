@@ -12,6 +12,8 @@ from torch import nn
 
 from forge_rl.runtime import (
     DoubleBufferedPolicyReplica,
+    FastMailboxInferenceClient,
+    FastMailboxNodeLocalInferenceService,
     MailboxInferenceClient,
     MailboxInferenceEndpoint,
     MailboxNodeLocalInferenceService,
@@ -53,15 +55,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-wait-ms", type=float, default=2.0)
     parser.add_argument(
         "--service-mode",
-        choices=("mailbox", "event", "polling", "threaded"),
-        default="mailbox",
+        choices=("mailbox-fast", "mailbox", "event", "polling", "threaded"),
+        default="mailbox-fast",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    mailbox = args.service_mode == "mailbox"
+    mailbox = args.service_mode in {"mailbox-fast", "mailbox"}
     if mailbox:
         endpoints = [
             MailboxInferenceEndpoint.create(
@@ -95,6 +97,7 @@ def main() -> None:
     registry = PolicyRegistry(history_size=2)
     snapshot = registry.publish(source.state_dict(), version=0)
     service_class = {
+        "mailbox-fast": FastMailboxNodeLocalInferenceService,
         "mailbox": MailboxNodeLocalInferenceService,
         "event": NodeLocalInferenceService,
         "polling": PollingNodeLocalInferenceService,
@@ -110,7 +113,12 @@ def main() -> None:
     )
     service.refresh_policy(snapshot)
     service.start()
-    if mailbox:
+    if args.service_mode == "mailbox-fast":
+        clients = [
+            FastMailboxInferenceClient(endpoint, copy_outputs=False)
+            for endpoint in endpoints
+        ]
+    elif args.service_mode == "mailbox":
         clients = [
             MailboxInferenceClient(endpoint, copy_outputs=False)
             for endpoint in endpoints

@@ -61,6 +61,7 @@ def main() -> None:
         max_batch_items=args.max_batch_items,
         v2_min_batch_items=args.v2_min_batch_items,
         legacy_min_batch_items=args.legacy_min_batch_items,
+        max_wait_ms=args.max_wait_ms,
         request_slots=args.request_slots,
         model_seed=args.model_seed,
         throughput_gate=args.throughput_gate,

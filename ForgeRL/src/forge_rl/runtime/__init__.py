@@ -7,6 +7,10 @@ from .event_driven_inference import (
     NodeLocalInferenceService,
 )
 from .experience import ExperienceItem, OnPolicyExperienceQueue
+from .fast_mailbox_inference import (
+    FastMailboxInferenceClient,
+    FastMailboxNodeLocalInferenceService,
+)
 from .inference import (
     DoubleBufferedPolicyReplica,
     InferenceMetricsSnapshot,
@@ -36,6 +40,8 @@ __all__ = [
     "DoubleBufferedPolicyReplica",
     "EventDrivenInferenceMetricsSnapshot",
     "ExperienceItem",
+    "FastMailboxInferenceClient",
+    "FastMailboxNodeLocalInferenceService",
     "InferenceMetricsSnapshot",
     "InferenceResponse",
     "InMemoryCoordinator",

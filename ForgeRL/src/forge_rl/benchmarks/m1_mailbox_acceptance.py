@@ -10,9 +10,9 @@ import torch
 
 from forge_rl.runtime import (
     DoubleBufferedPolicyReplica,
-    MailboxInferenceClient,
+    FastMailboxInferenceClient,
+    FastMailboxNodeLocalInferenceService,
     MailboxInferenceEndpoint,
-    MailboxNodeLocalInferenceService,
     PolicyRegistry,
 )
 
@@ -41,7 +41,7 @@ def _run_mailbox_v2(
             max_items=config.items_per_request,
             request_fields={"obs": ((config.width,), np.float32)},
             response_fields={
-                "action": ((config.output_size,), np.float32),
+                "action": ((config.output_size,), np.float32)},
                 "value": ((1,), np.float32),
             },
         )
@@ -53,7 +53,7 @@ def _run_mailbox_v2(
 
     registry = PolicyRegistry(history_size=2)
     snapshot = registry.publish(state, version=0)
-    service = MailboxNodeLocalInferenceService(
+    service = FastMailboxNodeLocalInferenceService(
         endpoints=endpoints,
         replica=DoubleBufferedPolicyReplica(
             factory,
@@ -68,7 +68,7 @@ def _run_mailbox_v2(
     service.refresh_policy(snapshot)
     service.start()
     clients = [
-        MailboxInferenceClient(endpoint, copy_outputs=False)
+        FastMailboxInferenceClient(endpoint, copy_outputs=False)
         for endpoint in endpoints
     ]
     collected: list[tuple[int, int, int, int]] = []
@@ -115,7 +115,7 @@ def _run_mailbox_v2(
 
     audit = audit_transition_identities(collected, trained)
     return RuntimeReport(
-        "forge_rl_v2_persistent_mailbox",
+        "forge_rl_v2_fast_persistent_mailbox",
         elapsed,
         config.actors * config.requests_per_actor,
         config.actors * config.requests_per_actor * config.items_per_request,
@@ -138,8 +138,6 @@ def run_m1_acceptance(
     config: M1AcceptanceConfig,
     learning_gate: LearningGate | None = None,
 ) -> M1AcceptanceReport:
-    """Run the frozen v1 baseline against the synchronous mailbox v2 fast path."""
-
     config.validate()
     torch.set_num_threads(1)
     try:
@@ -185,7 +183,7 @@ def run_m1_acceptance(
         config=config,
         environment={
             **_fingerprint(),
-            "v2_runtime": "persistent-synchronous-mailbox",
+            "v2_runtime": "fast-persistent-synchronous-mailbox",
         },
         legacy=legacy,
         v2=v2,

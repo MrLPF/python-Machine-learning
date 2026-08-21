@@ -9,9 +9,9 @@ import torch
 
 from forge_rl.runtime import (
     DoubleBufferedPolicyReplica,
-    MailboxInferenceClient,
+    FastMailboxInferenceClient,
+    FastMailboxNodeLocalInferenceService,
     MailboxInferenceEndpoint,
-    MailboxNodeLocalInferenceService,
     PolicyRegistry,
 )
 
@@ -22,7 +22,7 @@ _PATCH_LOCK = threading.Lock()
 
 
 class _MailboxLearningRuntime:
-    """Learning-harness adapter for the synchronous mailbox v2 data plane."""
+    """Learning-harness adapter for the fast synchronous mailbox data plane."""
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class _MailboxLearningRuntime:
 
         self.registry = PolicyRegistry(history_size=2)
         snapshot = self.registry.publish(state_dict, version=0)
-        self.service = MailboxNodeLocalInferenceService(
+        self.service = FastMailboxNodeLocalInferenceService(
             endpoints=self.endpoints,
             replica=DoubleBufferedPolicyReplica(factory, device=config.device),
             infer_fn=run_synthetic_policy,
@@ -68,7 +68,7 @@ class _MailboxLearningRuntime:
         self.service.refresh_policy(snapshot)
         self.service.start()
         self.clients = [
-            MailboxInferenceClient(endpoint, copy_outputs=False)
+            FastMailboxInferenceClient(endpoint, copy_outputs=False)
             for endpoint in self.endpoints
         ]
 
@@ -96,7 +96,7 @@ class _MailboxLearningRuntime:
         return {
             **inference,
             **{f"mailbox_{key}": value for key, value in transport.items()},
-            "runtime": "persistent-synchronous-mailbox",
+            "runtime": "fast-persistent-synchronous-mailbox",
         }
 
     def close(self) -> None:
@@ -113,8 +113,6 @@ class _MailboxLearningRuntime:
 def run_learning_benchmark(
     config: _base.LearningBenchmarkConfig,
 ) -> _base.LearningBenchmarkReport:
-    """Run the existing reference PPO protocol with the mailbox v2 subject."""
-
     with _PATCH_LOCK:
         previous = _base._SharedLearningRuntime
         _base._SharedLearningRuntime = _MailboxLearningRuntime

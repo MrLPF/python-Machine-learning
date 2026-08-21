@@ -43,11 +43,11 @@ jobs:
       - name: Runtime microbenchmark
         working-directory: ForgeRL
         run: python scripts/benchmark_runtime.py --items 20000 --width 64 --slots 32
-      - name: M1 mailbox inference microbenchmark
+      - name: M1 fast-mailbox inference microbenchmark
         working-directory: ForgeRL
         run: |
           python scripts/benchmark_m1_inference.py \
-            --service-mode mailbox \
+            --service-mode mailbox-fast \
             --actors 2 --requests-per-actor 25 --items-per-request 4 \
             --width 16 --max-batch-items 16 --min-batch-items 8
       - name: M1 v1/v2 acceptance correctness smoke
@@ -61,7 +61,7 @@ jobs:
             --actors 2 --requests-per-actor 8 --items-per-request 2 \
             --width 16 --output-size 4 --max-batch-items 8 \
             --v2-min-batch-items 4 --legacy-min-batch-items 1 \
-            --request-slots 4 --throughput-gate 0 \
+            --max-wait-ms 0.5 --request-slots 4 --throughput-gate 0 \
             --output benchmarks/results/m1-acceptance-smoke.json
       - name: M1 mailbox tuning matrix smoke
         if: matrix.python-version == '3.12'
@@ -74,6 +74,19 @@ jobs:
             --preset smoke --repeats 1 --warmup-repeats 0 \
             --requests-per-actor 8 \
             --output benchmarks/results/m1-tuning-matrix-smoke.json
+      - name: M1 target-scale mailbox screening
+        if: matrix.python-version == '3.12'
+        working-directory: ForgeRL
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          python scripts/benchmark_m1_acceptance.py \
+            --actors 8 --requests-per-actor 250 --items-per-request 8 \
+            --width 64 --output-size 4 --max-batch-items 128 \
+            --v2-min-batch-items 32 --legacy-min-batch-items 1 \
+            --max-wait-ms 0.5 --request-slots 8 --throughput-gate 0 \
+            --output benchmarks/results/m1-target-scale-screening.json
       - name: Upload M1 acceptance smoke report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
@@ -87,6 +100,13 @@ jobs:
         with:
           name: forgerl-m1-tuning-matrix-smoke
           path: ForgeRL/benchmarks/results/m1-tuning-matrix-smoke.json
+          if-no-files-found: error
+      - name: Upload M1 target-scale screening report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-target-scale-screening
+          path: ForgeRL/benchmarks/results/m1-target-scale-screening.json
           if-no-files-found: error
 
   distributed:
