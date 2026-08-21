@@ -107,7 +107,7 @@ class FastMailboxInferenceClient(MailboxInferenceClient):
 
 
 class FastMailboxNodeLocalInferenceService(MailboxNodeLocalInferenceService):
-    """Prebound mailbox views and two-phase response release."""
+    """Prebound mailbox views, greedy ready draining and two-phase response release."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -127,6 +127,56 @@ class FastMailboxNodeLocalInferenceService(MailboxNodeLocalInferenceService):
             endpoint.actor_id: bytearray(_RESPONSE.size)
             for endpoint in self.endpoints
         }
+
+    def _collect_batch(self, first: _MailboxRequest) -> list[_MailboxRequest]:
+        """Wait only until the minimum, then absorb every already-ready request for free.
+
+        The earlier mailbox inherited two behaviours that reduced target-scale batch fill:
+        its deadline started at the Actor submission timestamp, and it stopped immediately when
+        ``min_batch_items`` was reached. Transport/scheduler delay could therefore consume the
+        entire wait budget before collection began, while requests that were already ready were
+        deferred to the next inference call. This implementation starts the budget when the
+        service receives the first request and greedily drains pending/ready descriptors without
+        adding latency once the minimum has been met.
+        """
+
+        batch = [first]
+        items = first.item_count
+        deadline = time.monotonic() + self.max_wait_seconds
+
+        while items < self.min_batch_items and items < self.max_batch_items:
+            if self._pending:
+                candidate = self._pending.popleft()
+            else:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                ready = self._receive_ready(remaining)
+                if not ready:
+                    break
+                candidate = ready[0]
+                self._pending.extend(ready[1:])
+            if items + candidate.item_count > self.max_batch_items:
+                self._pending.appendleft(candidate)
+                return batch
+            batch.append(candidate)
+            items += candidate.item_count
+
+        while items < self.max_batch_items:
+            while self._pending and items < self.max_batch_items:
+                candidate = self._pending.popleft()
+                if items + candidate.item_count > self.max_batch_items:
+                    self._pending.appendleft(candidate)
+                    return batch
+                batch.append(candidate)
+                items += candidate.item_count
+            if items >= self.max_batch_items:
+                break
+            ready = self._receive_ready(0.0)
+            if not ready:
+                break
+            self._pending.extend(ready)
+        return batch
 
     def _execute(self, requests: Sequence[_MailboxRequest]) -> None:
         views = [
