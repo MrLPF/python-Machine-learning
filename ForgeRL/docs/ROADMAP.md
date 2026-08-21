@@ -23,13 +23,22 @@
 - [x] Add pinned-memory/non-blocking H2D pipeline and AMP inference.
 - [x] Freeze the uploaded v1 predictor data-plane reference with source hashes.
 - [x] Add same-model v1/v2 transition audit and synthetic acceptance report.
+- [x] Implement a shared PPO learning core for the v1/v2 CartPole and Pendulum comparison.
+- [x] Add deterministic transition, policy-version, time-to-target and normalized-AUC evidence.
+- [x] Add a normal-CI learning plumbing smoke that cannot produce a formal `GO`.
+- [x] Add a pinned self-hosted workflow for the formal five-seed learning and final M1 gates.
 - [ ] Run the controlled >=2x valid-row throughput gate on pinned hardware.
-- [ ] Run five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
+- [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
+- [ ] Persist an `m1-final.json` report whose status is `GO`.
 
 **Go gate:** at least 2x valid-transition throughput over v1 on the controlled synthetic benchmark,
-zero missing/duplicate/invalid rows, numerically equivalent outputs, and no more than 5% degradation
-in time-to-target or normalized learning AUC on CartPole/Pendulum. CI smoke success alone is not
-M1 acceptance. The persisted final report must have status `GO`.
+zero missing/duplicate/invalid rows, numerically equivalent outputs, every required learning seed
+reaching its environment target, and no more than 5% degradation in time-to-target or normalized
+learning AUC on CartPole/Pendulum. CI smoke success alone is not M1 acceptance. The persisted final
+report must have status `GO`.
+
+The implementation of a gate is not evidence that the gate passed. Until the two unchecked runs
+above complete on the documented pinned runner, M1 remains **not performance accepted**.
 
 ## M2 — multi-node learner and control plane
 
@@ -54,6 +63,9 @@ not be marked performance-accepted or merged as such before `docs/M1_ACCEPTANCE.
 - [ ] Replay table for SAC/R2D2/offline RL.
 - [ ] Burn-in and true truncated BPTT for recurrent policies.
 - [ ] League/self-play policy registry.
+
+The reference PPO used by the M1 acceptance harness is intentionally benchmark-only. It does not
+mark the M3 algorithm-plugin architecture as complete.
 
 ## Stop/reconsider conditions
 

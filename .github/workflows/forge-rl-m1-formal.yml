@@ -1,0 +1,95 @@
+name: ForgeRL M1 formal acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Pre-provisioned benchmark device
+        required: true
+        default: cpu
+        type: choice
+        options: [cpu, cuda]
+      seeds:
+        description: Exactly five or more comma-separated seeds
+        required: true
+        default: "1,2,3,4,5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  formal-m1:
+    runs-on: [self-hosted, linux, x64, forgerl-benchmark]
+    timeout-minutes: 720
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned benchmark image
+        working-directory: ForgeRL
+        run: |
+          command -v taskset >/dev/null || { echo "taskset is required" >&2; exit 2; }
+          test -n "${FORGERL_CPUSET:-}" || {
+            echo "FORGERL_CPUSET must identify the pinned benchmark cores" >&2
+            exit 2
+          }
+          python - <<'PY'
+          import os
+          import gymnasium
+          import numpy
+          import torch
+          expected_torch = os.environ.get("FORGERL_EXPECTED_TORCH")
+          expected_gym = os.environ.get("FORGERL_EXPECTED_GYMNASIUM")
+          if expected_torch and torch.__version__ != expected_torch:
+              raise SystemExit(f"torch {torch.__version__} != {expected_torch}")
+          if expected_gym and gymnasium.__version__ != expected_gym:
+              raise SystemExit(f"gymnasium {gymnasium.__version__} != {expected_gym}")
+          requested = "${{ inputs.device }}"
+          if requested == "cuda" and not torch.cuda.is_available():
+              raise SystemExit("CUDA formal acceptance requested but CUDA is unavailable")
+          print({
+              "python": __import__("sys").version.split()[0],
+              "torch": torch.__version__,
+              "numpy": numpy.__version__,
+              "gymnasium": gymnasium.__version__,
+              "cuda": torch.cuda.is_available(),
+              "cpuset": os.environ["FORGERL_CPUSET"],
+          })
+          PY
+          python -m pip install -e . --no-deps
+      - name: Run five-seed CartPole/Pendulum learning gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_learning.py \
+              --seeds "${{ inputs.seeds }}" \
+              --environments CartPole-v1,Pendulum-v1 \
+              --device "${{ inputs.device }}" \
+              --require-learning-gate \
+              --output benchmarks/results/m1-learning-formal.json
+      - name: Run controlled synthetic and final M1 gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_acceptance.py \
+              --actors 8 --requests-per-actor 2000 --items-per-request 8 \
+              --width 64 --max-batch-items 128 \
+              --v2-min-batch-items 32 --legacy-min-batch-items 1 \
+              --device "${{ inputs.device }}" \
+              --throughput-gate 2.0 \
+              --learning-report benchmarks/results/m1-learning-formal.json \
+              --require-go \
+              --output benchmarks/results/m1-final.json
+      - name: Upload formal M1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-formal-evidence
+          path: |
+            ForgeRL/benchmarks/results/m1-learning-formal.json
+            ForgeRL/benchmarks/results/m1-final.json
+          if-no-files-found: warn

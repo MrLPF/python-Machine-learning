@@ -22,26 +22,26 @@ intentionally **not** a replacement for PyTorch or OneFlow's tensor/autograd lay
 - explicit `terminated`, `truncated` and invalid-system-transition contracts;
 - validated `TransitionBatch` with unique step identity;
 - bounded on-policy experience queue with policy-lag and age filtering;
-- versioned policy registry;
-- coordinator lease/heartbeat contract;
+- versioned policy registry and coordinator lease/heartbeat contracts;
 - PyTorch DDP learner utilities and two-process Gloo CI.
 
-### M1 — local high-throughput runtime
+### M1 — local high-throughput runtime and acceptance tooling
 
 - generation-safe shared-memory tensor-tree channels;
 - compact slot descriptors instead of pickled tensor payloads;
 - cross-actor deadline/minimum-size dynamic inference batching;
 - active/staging double-buffered policy replicas;
 - optional pinned-memory, non-blocking H2D and AMP inference path;
-- `TrajectoryBuilder` with separate bootstrap state and no lost final transition;
-- stable C ABI for vectorized C++ environments;
-- deterministic C++ counter-environment reference implementation;
+- lossless trajectory fragments with separate bootstrap state;
+- stable C ABI for vectorized C++ environments and a deterministic reference environment;
 - source-fingerprinted v1 Queue/pickle predictor reference;
-- same-model v1/v2 transition audit and acceptance-report generator.
+- same-model v1/v2 synthetic transition audit;
+- shared reference PPO core for CartPole/Pendulum learning-quality comparison;
+- normal-CI learning plumbing smoke and a pinned self-hosted five-seed workflow.
 
-M1 code is implemented, but the performance gate remains open until the controlled >=2x
-valid-row benchmark and five-seed CartPole/Pendulum learning gate both pass. A green CI smoke run
-is not an M1 `GO` decision.
+M1 is **not performance accepted**. Acceptance still requires a pinned-hardware `>=2x` valid-row
+result and a formal five-seed report for both environments whose final `m1-final.json` status is
+`GO`. Green hosted CI alone is not that evidence.
 
 ## Quick start
 
@@ -57,16 +57,28 @@ python scripts/benchmark_m1_acceptance.py \
   --actors 2 --requests-per-actor 8 --items-per-request 2 \
   --width 16 --max-batch-items 8 --v2-min-batch-items 4 \
   --throughput-gate 0
+python scripts/benchmark_m1_learning.py \
+  --smoke --seeds 7 \
+  --environments CartPole-v1,Pendulum-v1 \
+  --output benchmarks/results/m1-learning-smoke.json
 ```
+
+## Formal M1 execution
+
+The manual `.github/workflows/forge-rl-m1-formal.yml` workflow targets a pinned self-hosted runner
+labelled `forgerl-benchmark`. It runs the formal paired five-seed learning gate, the controlled
+synthetic throughput gate, and the final `--require-go` decision without replacing the runner's
+pre-provisioned Python environment.
 
 ## Initial benchmark environments
 
 - `CartPole-v1`: discrete-action correctness and time-to-target;
-- `Pendulum-v1`: continuous-action protocol and throughput;
-- PettingZoo MPE `simple_spread_v3`: phase-2 multi-agent/MAPPO test;
+- `Pendulum-v1`: continuous-action correctness and time-to-target;
+- PettingZoo MPE `simple_spread_v3`: later multi-agent/MAPPO testing;
 - optional Gymnasium MuJoCo `Ant-v5`: later cloud scaling and continuous control.
 
-The C++ counter environment is a runtime/ABI benchmark, not a learning-quality benchmark.
+The reference PPO is an M1 acceptance subject, not completion of the M3 algorithm-plugin work. The
+C++ counter environment is a runtime/ABI benchmark, not a learning-quality benchmark.
 
 ## Repository status
 

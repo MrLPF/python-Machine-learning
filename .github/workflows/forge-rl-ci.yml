@@ -110,3 +110,20 @@ jobs:
       - name: Pendulum environment smoke benchmark
         working-directory: ForgeRL
         run: python scripts/benchmark_env.py --env Pendulum-v1 --envs 8 --steps 5000
+      - name: M1 PPO learning plumbing smoke
+        working-directory: ForgeRL
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+        run: |
+          python scripts/benchmark_m1_learning.py \
+            --smoke --seeds 7 \
+            --environments CartPole-v1,Pendulum-v1 \
+            --device cpu \
+            --output benchmarks/results/m1-learning-smoke.json
+      - name: Upload M1 learning smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-learning-smoke
+          path: ForgeRL/benchmarks/results/m1-learning-smoke.json
+          if-no-files-found: error
