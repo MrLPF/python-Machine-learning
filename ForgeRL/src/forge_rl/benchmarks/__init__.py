@@ -15,8 +15,9 @@ from .m1_acceptance import (
     M1AcceptanceConfig,
     M1AcceptanceReport,
     RuntimeReport,
-    run_m1_acceptance,
+    run_m1_acceptance as run_event_m1_acceptance,
 )
+from .m1_mailbox_acceptance import run_m1_acceptance
 from .ppo_learning import (
     ENVIRONMENT_SPECS,
     EvaluationPoint,
@@ -25,8 +26,9 @@ from .ppo_learning import (
     LearningRun,
     PPOHyperparameters,
     compute_gae,
-    run_learning_benchmark,
+    run_learning_benchmark as run_event_learning_benchmark,
 )
+from .ppo_learning_mailbox import run_learning_benchmark
 
 __all__ = [
     "ENVIRONMENT_SPECS",
@@ -49,6 +51,8 @@ __all__ = [
     "audit_transition_identities",
     "compute_gae",
     "identities_from_batch",
+    "run_event_learning_benchmark",
+    "run_event_m1_acceptance",
     "run_learning_benchmark",
     "run_m1_acceptance",
     "run_synthetic_policy",

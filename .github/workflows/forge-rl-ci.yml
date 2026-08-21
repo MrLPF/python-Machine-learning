@@ -43,11 +43,11 @@ jobs:
       - name: Runtime microbenchmark
         working-directory: ForgeRL
         run: python scripts/benchmark_runtime.py --items 20000 --width 64 --slots 32
-      - name: M1 shared inference microbenchmark
+      - name: M1 mailbox inference microbenchmark
         working-directory: ForgeRL
         run: |
           python scripts/benchmark_m1_inference.py \
-            --service-mode event \
+            --service-mode mailbox \
             --actors 2 --requests-per-actor 25 --items-per-request 4 \
             --width 16 --max-batch-items 16 --min-batch-items 8
       - name: M1 v1/v2 acceptance correctness smoke
@@ -63,7 +63,7 @@ jobs:
             --v2-min-batch-items 4 --legacy-min-batch-items 1 \
             --request-slots 4 --throughput-gate 0 \
             --output benchmarks/results/m1-acceptance-smoke.json
-      - name: M1 event-driven tuning matrix smoke
+      - name: M1 mailbox tuning matrix smoke
         if: matrix.python-version == '3.12'
         working-directory: ForgeRL
         env:

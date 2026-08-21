@@ -14,6 +14,13 @@ from .inference import (
     SharedInferenceClient,
     SharedInferenceEndpoint,
 )
+from .mailbox_inference import (
+    MailboxClientDescriptor,
+    MailboxInferenceClient,
+    MailboxInferenceEndpoint,
+    MailboxNodeLocalInferenceService,
+    MailboxTransportMetricsSnapshot,
+)
 from .optimized_inference import (
     NodeLocalInferenceService as PollingNodeLocalInferenceService,
     OptimizedInferenceMetricsSnapshot,
@@ -32,6 +39,11 @@ __all__ = [
     "InferenceMetricsSnapshot",
     "InferenceResponse",
     "InMemoryCoordinator",
+    "MailboxClientDescriptor",
+    "MailboxInferenceClient",
+    "MailboxInferenceEndpoint",
+    "MailboxNodeLocalInferenceService",
+    "MailboxTransportMetricsSnapshot",
     "NodeLease",
     "NodeLocalInferenceService",
     "NodeRole",

@@ -12,6 +12,9 @@ from torch import nn
 
 from forge_rl.runtime import (
     DoubleBufferedPolicyReplica,
+    MailboxInferenceClient,
+    MailboxInferenceEndpoint,
+    MailboxNodeLocalInferenceService,
     NodeLocalInferenceService,
     PolicyRegistry,
     PollingNodeLocalInferenceService,
@@ -50,32 +53,49 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-wait-ms", type=float, default=2.0)
     parser.add_argument(
         "--service-mode",
-        choices=("event", "polling", "threaded"),
-        default="event",
+        choices=("mailbox", "event", "polling", "threaded"),
+        default="mailbox",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    endpoints = [
-        SharedInferenceEndpoint.create(
-            actor_id=actor_id,
-            slot_count=8,
-            max_items=args.items_per_request,
-            request_fields={"obs": ((args.width,), np.float32)},
-            response_fields={
-                "action": ((4,), np.float32),
-                "value": ((1,), np.float32),
-            },
-        )
-        for actor_id in range(args.actors)
-    ]
+    mailbox = args.service_mode == "mailbox"
+    if mailbox:
+        endpoints = [
+            MailboxInferenceEndpoint.create(
+                actor_id=actor_id,
+                max_items=args.items_per_request,
+                request_fields={"obs": ((args.width,), np.float32)},
+                response_fields={
+                    "action": ((4,), np.float32),
+                    "value": ((1,), np.float32),
+                },
+            )
+            for actor_id in range(args.actors)
+        ]
+    else:
+        endpoints = [
+            SharedInferenceEndpoint.create(
+                actor_id=actor_id,
+                slot_count=8,
+                max_items=args.items_per_request,
+                request_fields={"obs": ((args.width,), np.float32)},
+                response_fields={
+                    "action": ((4,), np.float32),
+                    "value": ((1,), np.float32),
+                },
+            )
+            for actor_id in range(args.actors)
+        ]
+
     factory = lambda: BenchmarkPolicy(args.width)
     source = factory()
     registry = PolicyRegistry(history_size=2)
     snapshot = registry.publish(source.state_dict(), version=0)
     service_class = {
+        "mailbox": MailboxNodeLocalInferenceService,
         "event": NodeLocalInferenceService,
         "polling": PollingNodeLocalInferenceService,
         "threaded": ThreadedNodeLocalInferenceService,
@@ -90,7 +110,13 @@ def main() -> None:
     )
     service.refresh_policy(snapshot)
     service.start()
-    clients = [SharedInferenceClient(endpoint) for endpoint in endpoints]
+    if mailbox:
+        clients = [
+            MailboxInferenceClient(endpoint, copy_outputs=False)
+            for endpoint in endpoints
+        ]
+    else:
+        clients = [SharedInferenceClient(endpoint) for endpoint in endpoints]
     inputs = [
         np.random.default_rng(actor_id).standard_normal(
             (args.items_per_request, args.width), dtype=np.float32
@@ -100,13 +126,19 @@ def main() -> None:
 
     def actor_loop(actor_id: int) -> None:
         for _ in range(args.requests_per_actor):
-            clients[actor_id].infer({"obs": inputs[actor_id]}, min_policy_version=0, timeout=10)
+            clients[actor_id].infer(
+                {"obs": inputs[actor_id]},
+                min_policy_version=0,
+                timeout=10.0,
+            )
 
     started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=args.actors) as executor:
-        list(executor.map(actor_loop, range(args.actors)))
-    elapsed = time.perf_counter() - started
-    service.stop()
+    try:
+        with ThreadPoolExecutor(max_workers=args.actors) as executor:
+            list(executor.map(actor_loop, range(args.actors)))
+        elapsed = time.perf_counter() - started
+    finally:
+        service.stop()
     metrics = service.metrics()
     total_items = args.actors * args.requests_per_actor * args.items_per_request
     report = {
@@ -122,7 +154,13 @@ def main() -> None:
         report["optimization"] = asdict(service.optimization_metrics())
     if hasattr(service, "event_metrics"):
         report["event_driven"] = asdict(service.event_metrics())
+    if hasattr(service, "transport_metrics"):
+        report["mailbox"] = asdict(service.transport_metrics())
     print(json.dumps(report, indent=2, sort_keys=True))
+    for client in clients:
+        close = getattr(client, "close", None)
+        if close is not None:
+            close()
     for endpoint in endpoints:
         endpoint.shutdown()
         endpoint.close()
