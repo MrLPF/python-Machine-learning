@@ -132,6 +132,8 @@ class NodeLocalInferenceService(PollingNodeLocalInferenceService):
         response_timeout_seconds: float = 5.0,
         notification_drain_limit: int = 64,
         notification_wait_ms: float = 50.0,
+        collector_poll_ms: float | None = None,
+        max_drain_per_endpoint: int | None = None,
         mp_context: BaseContext | None = None,
     ) -> None:
         super().__init__(
@@ -147,7 +149,22 @@ class NodeLocalInferenceService(PollingNodeLocalInferenceService):
             raise ValueError("notification_drain_limit must be positive")
         if notification_wait_ms <= 0:
             raise ValueError("notification_wait_ms must be positive")
+        # These two keyword arguments belonged to the preceding polling implementation.
+        # Accept them during the M1 migration so existing callers and regression tests do not
+        # break when the default service changes. The event-driven collector does not poll,
+        # while the old per-endpoint drain cap maps to the closest node-level burst limit.
+        if collector_poll_ms is not None and collector_poll_ms <= 0:
+            raise ValueError("collector_poll_ms must be positive when provided")
+        if max_drain_per_endpoint is not None:
+            if max_drain_per_endpoint <= 0:
+                raise ValueError("max_drain_per_endpoint must be positive when provided")
+            notification_drain_limit = max(
+                int(notification_drain_limit), int(max_drain_per_endpoint)
+            )
         context = mp_context or mp.get_context()
+        self.compatibility_collector_poll_ms = (
+            None if collector_poll_ms is None else float(collector_poll_ms)
+        )
         self.notification_drain_limit = int(notification_drain_limit)
         self.notification_wait_seconds = float(notification_wait_ms) / 1000.0
         self._notification_queue = context.Queue()
