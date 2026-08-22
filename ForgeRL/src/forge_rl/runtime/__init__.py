@@ -12,7 +12,9 @@ from .fast_mailbox_inference import (
     FastMailboxInferenceClient,
     FastMailboxNodeLocalInferenceService,
 )
-from .in_process_inference import InProcessBatchingInferenceRuntime
+from .in_process_inference import (
+    InProcessBatchingInferenceRuntime as LegacyInProcessBatchingInferenceRuntime,
+)
 from .inference import (
     DoubleBufferedPolicyReplica,
     InferenceMetricsSnapshot,
@@ -34,8 +36,15 @@ from .optimized_inference import (
 )
 from .policy_registry import PolicyRegistry, PolicySnapshot
 from .process_mailbox_inference import ProcessMailboxInferenceRuntime
+from .rendezvous_in_process_inference import (
+    RendezvousInProcessBatchingInferenceRuntime,
+)
 from .trajectory import TrajectoryBuilder, TrajectoryFragment
 from .transition import TransitionBatch, TransitionIdentityError
+
+# The public in-process runtime now uses bounded Actor-wave rendezvous. The previous implementation
+# remains available under an explicit regression-only name for controlled A/B measurements.
+InProcessBatchingInferenceRuntime = RendezvousInProcessBatchingInferenceRuntime
 
 __all__ = [
     "ActorLocalInferenceRuntime",
@@ -50,6 +59,7 @@ __all__ = [
     "InferenceResponse",
     "InMemoryCoordinator",
     "InProcessBatchingInferenceRuntime",
+    "LegacyInProcessBatchingInferenceRuntime",
     "MailboxClientDescriptor",
     "MailboxInferenceClient",
     "MailboxInferenceEndpoint",
@@ -64,6 +74,7 @@ __all__ = [
     "PolicySnapshot",
     "PollingNodeLocalInferenceService",
     "ProcessMailboxInferenceRuntime",
+    "RendezvousInProcessBatchingInferenceRuntime",
     "SharedInferenceClient",
     "SharedInferenceEndpoint",
     "ThreadedNodeLocalInferenceService",
