@@ -34,7 +34,7 @@ from .ppo_learning import (
     compute_gae,
     run_learning_benchmark as run_event_learning_benchmark,
 )
-from .ppo_learning_mailbox import run_learning_benchmark
+from .ppo_learning_vector import run_learning_benchmark
 
 __all__ = [
     "ENVIRONMENT_SPECS",
