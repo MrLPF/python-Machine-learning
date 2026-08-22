@@ -12,6 +12,7 @@ from .fast_mailbox_inference import (
     FastMailboxInferenceClient,
     FastMailboxNodeLocalInferenceService,
 )
+from .in_process_inference import InProcessBatchingInferenceRuntime
 from .inference import (
     DoubleBufferedPolicyReplica,
     InferenceMetricsSnapshot,
@@ -48,6 +49,7 @@ __all__ = [
     "InferenceMetricsSnapshot",
     "InferenceResponse",
     "InMemoryCoordinator",
+    "InProcessBatchingInferenceRuntime",
     "MailboxClientDescriptor",
     "MailboxInferenceClient",
     "MailboxInferenceEndpoint",

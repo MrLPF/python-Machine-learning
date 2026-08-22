@@ -26,11 +26,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument(
         "--v2-runtime",
-        choices=("auto", "actor-local", "process-mailbox"),
+        choices=("auto", "actor-local", "in-process-batch", "process-mailbox"),
         default="auto",
         help=(
-            "auto selects actor-local inference for CPU policies and the process mailbox "
-            "for CUDA. Explicit modes are retained for controlled topology A/B."
+            "auto selects zero-serialization in-process batching for CPU and the "
+            "process mailbox for CUDA. Explicit modes are retained for controlled A/B."
         ),
     )
     parser.add_argument(

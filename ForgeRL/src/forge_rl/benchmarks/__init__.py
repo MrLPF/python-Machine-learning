@@ -19,6 +19,7 @@ from .m1_acceptance import (
 )
 from .m1_mailbox_acceptance import (
     run_actor_local_m1_acceptance,
+    run_in_process_m1_acceptance,
     run_m1_acceptance,
     run_process_mailbox_m1_acceptance,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "run_actor_local_m1_acceptance",
     "run_event_learning_benchmark",
     "run_event_m1_acceptance",
+    "run_in_process_m1_acceptance",
     "run_learning_benchmark",
     "run_m1_acceptance",
     "run_process_mailbox_m1_acceptance",

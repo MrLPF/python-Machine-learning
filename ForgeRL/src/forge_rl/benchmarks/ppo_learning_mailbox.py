@@ -8,7 +8,7 @@ import numpy as np
 import torch
 
 from forge_rl.runtime import (
-    ActorLocalInferenceRuntime,
+    InProcessBatchingInferenceRuntime,
     ProcessMailboxInferenceRuntime,
 )
 
@@ -18,8 +18,8 @@ from . import ppo_learning as _base
 _PATCH_LOCK = threading.Lock()
 
 
-class _ActorLocalLearningRuntime:
-    """Learning-harness adapter for the small-policy CPU fast path."""
+class _InProcessLearningRuntime:
+    """Learning-harness adapter for zero-serialization local batching."""
 
     def __init__(
         self,
@@ -31,16 +31,21 @@ class _ActorLocalLearningRuntime:
         state_dict: Mapping[str, torch.Tensor],
         config: _base.LearningBenchmarkConfig,
     ) -> None:
-        if config.device != "cpu":
-            raise ValueError("actor-local learning runtime supports CPU only")
-        self.runtime = ActorLocalInferenceRuntime(
+        self.runtime = InProcessBatchingInferenceRuntime(
             actor_count=actor_count,
             module_type=ReferencePPOPolicy,
             module_args=(observation_size, action_size, hidden_size),
             infer_fn=run_synthetic_policy,
             state_dict=state_dict,
             policy_version=0,
-            max_batch_items=config.envs_per_actor,
+            max_batch_items=config.max_batch_items,
+            min_batch_items=min(
+                config.v2_min_batch_items,
+                actor_count * config.envs_per_actor,
+                config.max_batch_items,
+            ),
+            max_wait_ms=config.max_wait_ms,
+            device=config.device,
             copy_outputs=False,
         )
         self.runtime.start()
@@ -56,22 +61,25 @@ class _ActorLocalLearningRuntime:
             actor_id,
             {"obs": np.ascontiguousarray(observation, dtype=np.float32)},
             min_policy_version=min_policy_version,
+            timeout=30.0,
         )
         return response.outputs, response.policy_version
 
     def update(self, state_dict: Mapping[str, torch.Tensor], version: int) -> int:
-        return self.runtime.update_policy(state_dict, version=version)
+        return self.runtime.update_policy(
+            state_dict,
+            version=version,
+            timeout=30.0,
+        )
 
     def metrics(self) -> dict[str, float | int | str]:
         return {
             **asdict(self.runtime.metrics()),
-            "runtime": "actor-local-cpu",
-            "policy_replicas": self.runtime.actor_count,
-            "parameter_count_per_replica": self.runtime.parameter_count,
+            "runtime": "in-process-zero-serialization-batching",
         }
 
     def close(self) -> None:
-        self.runtime.close()
+        self.runtime.close(timeout=15.0)
 
 
 class _ProcessMailboxLearningRuntime:
@@ -153,7 +161,7 @@ def run_learning_benchmark(
     """Run identical PPO mathematics with a workload-appropriate v2 topology."""
 
     runtime_class = (
-        _ActorLocalLearningRuntime
+        _InProcessLearningRuntime
         if config.device == "cpu"
         else _ProcessMailboxLearningRuntime
     )

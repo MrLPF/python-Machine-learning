@@ -8,7 +8,11 @@ from typing import Callable, Mapping
 import numpy as np
 import torch
 
-from forge_rl.runtime import ActorLocalInferenceRuntime, ProcessMailboxInferenceRuntime
+from forge_rl.runtime import (
+    ActorLocalInferenceRuntime,
+    InProcessBatchingInferenceRuntime,
+    ProcessMailboxInferenceRuntime,
+)
 
 from .audit import audit_transition_identities
 from .legacy_v1 import SyntheticPolicy, run_synthetic_policy
@@ -23,6 +27,80 @@ from .m1_acceptance import (
     _observation,
     _run_legacy,
 )
+
+
+def _run_requests(
+    config: M1AcceptanceConfig,
+    infer: Callable[[int, np.ndarray], tuple[Mapping[str, np.ndarray], int, int]],
+) -> tuple[
+    float,
+    list[tuple[int, int, int, int]],
+    list[tuple[int, int, int, int]],
+    list[float],
+    list[int],
+]:
+    collected: list[tuple[int, int, int, int]] = []
+    trained: list[tuple[int, int, int, int]] = []
+    checksums = [0.0] * config.actors
+    tensor_bytes = [0] * config.actors
+
+    def actor_loop(actor: int) -> None:
+        total = 0.0
+        byte_count = 0
+        for sequence in range(config.requests_per_actor):
+            observation = _observation(config, actor, sequence)
+            collected.extend(_identities(config, actor, sequence))
+            outputs, _version, returned = infer(actor, observation)
+            trained.extend(_identities(config, actor, returned))
+            total += _checksum(outputs)
+            byte_count += observation.nbytes + sum(
+                value.nbytes for value in outputs.values()
+            )
+        checksums[actor] = total
+        tensor_bytes[actor] = byte_count
+
+    started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=config.actors) as pool:
+        list(pool.map(actor_loop, range(config.actors)))
+    return (
+        time.perf_counter() - started,
+        collected,
+        trained,
+        checksums,
+        tensor_bytes,
+    )
+
+
+def _report(
+    *,
+    name: str,
+    config: M1AcceptanceConfig,
+    elapsed: float,
+    collected: list[tuple[int, int, int, int]],
+    trained: list[tuple[int, int, int, int]],
+    checksums: list[float],
+    tensor_bytes: list[int],
+    metrics,
+) -> RuntimeReport:
+    audit = audit_transition_identities(collected, trained)
+    return RuntimeReport(
+        name,
+        elapsed,
+        config.actors * config.requests_per_actor,
+        config.actors * config.requests_per_actor * config.items_per_request,
+        audit.unique_trained_rows / elapsed,
+        metrics.batches,
+        metrics.mean_batch_items,
+        metrics.batch_fill_ratio,
+        metrics.latency_p50_ms,
+        metrics.latency_p95_ms,
+        metrics.latency_p99_ms,
+        metrics.errors,
+        0,
+        sum(tensor_bytes),
+        float(math.fsum(checksums)),
+        audit,
+    )
 
 
 def _run_actor_local_v2(
@@ -40,51 +118,91 @@ def _run_actor_local_v2(
         copy_outputs=False,
     )
     runtime.start()
-    collected: list[tuple[int, int, int, int]] = []
-    trained: list[tuple[int, int, int, int]] = []
-    checksums = [0.0] * config.actors
 
-    def actor_loop(actor: int) -> None:
-        total = 0.0
-        for sequence in range(config.requests_per_actor):
-            observation = _observation(config, actor, sequence)
-            collected.extend(_identities(config, actor, sequence))
-            response = runtime.infer(
-                actor,
-                {"obs": observation},
-                min_policy_version=0,
-            )
-            trained.extend(_identities(config, actor, response.sequence_id))
-            total += _checksum(response.outputs)
-        checksums[actor] = total
+    def infer(
+        actor: int, observation: np.ndarray
+    ) -> tuple[Mapping[str, np.ndarray], int, int]:
+        response = runtime.infer(
+            actor,
+            {"obs": observation},
+            min_policy_version=0,
+        )
+        return response.outputs, response.policy_version, response.sequence_id
 
-    started = time.perf_counter()
     try:
-        with ThreadPoolExecutor(max_workers=config.actors) as pool:
-            list(pool.map(actor_loop, range(config.actors)))
-        elapsed = time.perf_counter() - started
+        elapsed, collected, trained, checksums, tensor_bytes = _run_requests(
+            config, infer
+        )
         metrics = runtime.metrics()
     finally:
         runtime.close()
+    return _report(
+        name="forge_rl_v2_actor_local_cpu",
+        config=config,
+        elapsed=elapsed,
+        collected=collected,
+        trained=trained,
+        checksums=checksums,
+        tensor_bytes=tensor_bytes,
+        metrics=metrics,
+    )
 
-    audit = audit_transition_identities(collected, trained)
-    return RuntimeReport(
-        "forge_rl_v2_actor_local_cpu",
-        elapsed,
-        config.actors * config.requests_per_actor,
-        config.actors * config.requests_per_actor * config.items_per_request,
-        audit.unique_trained_rows / elapsed,
-        metrics.batches,
-        metrics.mean_batch_items,
-        metrics.batch_fill_ratio,
-        metrics.latency_p50_ms,
-        metrics.latency_p95_ms,
-        metrics.latency_p99_ms,
-        metrics.errors,
-        0,
-        0,
-        float(math.fsum(checksums)),
-        audit,
+
+def _run_in_process_v2(
+    config: M1AcceptanceConfig,
+    state: Mapping[str, torch.Tensor],
+) -> RuntimeReport:
+    runtime = InProcessBatchingInferenceRuntime(
+        actor_count=config.actors,
+        module_type=SyntheticPolicy,
+        module_args=(config.width, config.output_size),
+        infer_fn=run_synthetic_policy,
+        state_dict=state,
+        policy_version=0,
+        max_batch_items=config.max_batch_items,
+        min_batch_items=min(
+            config.v2_min_batch_items,
+            config.actors * config.items_per_request,
+            config.max_batch_items,
+        ),
+        max_wait_ms=config.max_wait_ms,
+        device=config.device,
+        amp_dtype=(
+            None if config.amp_dtype is None else getattr(torch, config.amp_dtype)
+        ),
+        copy_outputs=False,
+    )
+    runtime.start()
+
+    def infer(
+        actor: int, observation: np.ndarray
+    ) -> tuple[Mapping[str, np.ndarray], int, int]:
+        response = runtime.infer(
+            actor,
+            {"obs": observation},
+            min_policy_version=0,
+            timeout=15.0,
+        )
+        return response.outputs, response.policy_version, response.sequence_id
+
+    try:
+        elapsed, collected, trained, checksums, tensor_bytes = _run_requests(
+            config, infer
+        )
+        metrics = runtime.metrics()
+        if runtime.last_error is not None:
+            raise RuntimeError(runtime.last_error)
+    finally:
+        runtime.close()
+    return _report(
+        name="forge_rl_v2_in_process_batch",
+        config=config,
+        elapsed=elapsed,
+        collected=collected,
+        trained=trained,
+        checksums=checksums,
+        tensor_bytes=tensor_bytes,
+        metrics=metrics,
     )
 
 
@@ -115,58 +233,34 @@ def _run_process_mailbox_v2(
         copy_outputs=False,
     )
     runtime.start()
-    collected: list[tuple[int, int, int, int]] = []
-    trained: list[tuple[int, int, int, int]] = []
-    checksums = [0.0] * config.actors
-    tensor_bytes = [0] * config.actors
 
-    def actor_loop(actor: int) -> None:
-        total = 0.0
-        byte_count = 0
-        for sequence in range(config.requests_per_actor):
-            observation = _observation(config, actor, sequence)
-            collected.extend(_identities(config, actor, sequence))
-            response = runtime.infer(
-                actor,
-                {"obs": observation},
-                min_policy_version=0,
-                timeout=15.0,
-            )
-            trained.extend(_identities(config, actor, response.sequence_id))
-            total += _checksum(response.outputs)
-            byte_count += observation.nbytes + sum(
-                value.nbytes for value in response.outputs.values()
-            )
-        checksums[actor] = total
-        tensor_bytes[actor] = byte_count
+    def infer(
+        actor: int, observation: np.ndarray
+    ) -> tuple[Mapping[str, np.ndarray], int, int]:
+        response = runtime.infer(
+            actor,
+            {"obs": observation},
+            min_policy_version=0,
+            timeout=15.0,
+        )
+        return response.outputs, response.policy_version, response.sequence_id
 
-    started = time.perf_counter()
     try:
-        with ThreadPoolExecutor(max_workers=config.actors) as pool:
-            list(pool.map(actor_loop, range(config.actors)))
-        elapsed = time.perf_counter() - started
+        elapsed, collected, trained, checksums, tensor_bytes = _run_requests(
+            config, infer
+        )
         metrics, _transport = runtime.metrics_pair()
     finally:
         runtime.close()
-
-    audit = audit_transition_identities(collected, trained)
-    return RuntimeReport(
-        "forge_rl_v2_process_mailbox",
-        elapsed,
-        config.actors * config.requests_per_actor,
-        config.actors * config.requests_per_actor * config.items_per_request,
-        audit.unique_trained_rows / elapsed,
-        metrics.batches,
-        metrics.mean_batch_items,
-        metrics.batch_fill_ratio,
-        metrics.latency_p50_ms,
-        metrics.latency_p95_ms,
-        metrics.latency_p99_ms,
-        metrics.errors,
-        0,
-        sum(tensor_bytes),
-        float(math.fsum(checksums)),
-        audit,
+    return _report(
+        name="forge_rl_v2_process_mailbox",
+        config=config,
+        elapsed=elapsed,
+        collected=collected,
+        trained=trained,
+        checksums=checksums,
+        tensor_bytes=tensor_bytes,
+        metrics=metrics,
     )
 
 
@@ -228,8 +322,8 @@ def _evaluate(
             **_fingerprint(),
             "v2_runtime": runtime_name,
             "topology_selection": (
-                "small CPU policies run beside Actors; central mailbox remains "
-                "available for CUDA or explicitly selected workloads"
+                "threaded/C++ vector environments use zero-serialization in-process "
+                "batching; separate processes use mailbox transport"
             ),
         },
         legacy=legacy,
@@ -254,6 +348,18 @@ def run_actor_local_m1_acceptance(
     )
 
 
+def run_in_process_m1_acceptance(
+    config: M1AcceptanceConfig,
+    learning_gate: LearningGate | None = None,
+) -> M1AcceptanceReport:
+    return _evaluate(
+        config,
+        learning_gate,
+        runtime_name="in-process-batch",
+        runner=_run_in_process_v2,
+    )
+
+
 def run_process_mailbox_m1_acceptance(
     config: M1AcceptanceConfig,
     learning_gate: LearningGate | None = None,
@@ -274,11 +380,13 @@ def run_m1_acceptance(
 ) -> M1AcceptanceReport:
     selected = runtime_mode
     if selected == "auto":
-        selected = "actor-local" if config.device == "cpu" else "process-mailbox"
+        selected = "in-process-batch" if config.device == "cpu" else "process-mailbox"
     if selected == "actor-local":
         return run_actor_local_m1_acceptance(config, learning_gate)
+    if selected == "in-process-batch":
+        return run_in_process_m1_acceptance(config, learning_gate)
     if selected == "process-mailbox":
         return run_process_mailbox_m1_acceptance(config, learning_gate)
     raise ValueError(
-        "runtime_mode must be auto, actor-local or process-mailbox"
+        "runtime_mode must be auto, actor-local, in-process-batch or process-mailbox"
     )
