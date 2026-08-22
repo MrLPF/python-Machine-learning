@@ -22,6 +22,7 @@ from .m1_mailbox_acceptance import (
     run_in_process_m1_acceptance,
     run_m1_acceptance,
     run_process_mailbox_m1_acceptance,
+    run_vector_batch_m1_acceptance,
 )
 from .ppo_learning import (
     ENVIRONMENT_SPECS,
@@ -64,4 +65,5 @@ __all__ = [
     "run_m1_acceptance",
     "run_process_mailbox_m1_acceptance",
     "run_synthetic_policy",
+    "run_vector_batch_m1_acceptance",
 ]
