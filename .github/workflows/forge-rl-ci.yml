@@ -87,7 +87,7 @@ jobs:
             --v2-min-batch-items 32 --legacy-min-batch-items 1 \
             --max-wait-ms 0.5 --request-slots 8 --throughput-gate 0 \
             --output benchmarks/results/m1-target-scale-screening.json
-      - name: M1 double-buffer concurrency screening
+      - name: M1 vector-batch sampling screening
         if: matrix.python-version == '3.12'
         working-directory: ForgeRL
         env:
@@ -100,6 +100,7 @@ jobs:
             --actors 8 --requests-per-actor 1000 --items-per-request 8 \
             --width 64 --output-size 4 --max-batch-items 128 \
             --min-batch-items 64 --max-wait-ms 0.5 \
+            --v2-runtime vector-batch \
             --repeats 1 --warmup-repeats 0 \
             --output benchmarks/results/m1-double-buffer-screening.json
       - name: Upload M1 acceptance smoke report
@@ -123,11 +124,11 @@ jobs:
           name: forgerl-m1-target-scale-screening
           path: ForgeRL/benchmarks/results/m1-target-scale-screening.json
           if-no-files-found: error
-      - name: Upload M1 double-buffer screening report
+      - name: Upload M1 vector-batch screening report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
-          name: forgerl-m1-double-buffer-screening
+          name: forgerl-m1-vector-batch-screening
           path: ForgeRL/benchmarks/results/m1-double-buffer-screening.json
           if-no-files-found: error
 
