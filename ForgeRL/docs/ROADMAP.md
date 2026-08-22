@@ -27,32 +27,37 @@
 - [x] Add deterministic transition, policy-version, time-to-target and normalized-AUC evidence.
 - [x] Add a normal-CI learning plumbing smoke that cannot produce a formal `GO`.
 - [x] Add a pinned self-hosted workflow for the formal five-seed learning and final M1 gates.
-- [x] Replace per-actor receiver threads with one node-local collector.
-- [x] Reuse preallocated multi-request assembly buffers and keep one-request batches zero-copy.
-- [x] Expose collector, allocation and copy-volume counters for performance diagnosis.
-- [x] Replace endpoint-by-endpoint empty polling with one event-driven shared ready-descriptor queue.
-- [x] Validate the shared notification path from both threads and spawned Actor processes.
-- [x] Add a controlled actor/request/batch tuning matrix with explicit Python-vs-C++ stop/go states.
-- [ ] Run the controlled >=2x valid-row throughput gate on pinned hardware.
-- [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates.
+- [x] Preserve event-driven, polling and process-mailbox paths as regression/fallback subjects.
+- [x] Add controlled Actor/request/batch tuning and transport matrices.
+- [x] Identify timing-based cross-Actor aggregation as the target-topology bottleneck.
+- [x] Add `VectorBatchInferenceRuntime` with producer-defined contiguous batch membership.
+- [x] Align the formal synthetic throughput subject with `vector-batch`.
+- [x] Align the PPO learning-quality subject with the same `vector-batch` runtime.
+- [x] Close the reference C++ VectorEnv -> vector-batch -> TransitionBatch -> ExperienceQueue -> PPO update loop.
+- [x] Use explicit FP32 tolerances for batched-versus-sliced numerical checks on Python 3.11/3.12.
+- [ ] Run the controlled stable >=2x vector-batch throughput gate on the pinned runner.
+- [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates on the same runner.
 - [ ] Persist an `m1-final.json` report whose status is `GO`.
 
-**Go gate:** at least 2x valid-transition throughput over v1 on the controlled synthetic benchmark,
-zero missing/duplicate/invalid rows, numerically equivalent outputs, every required learning seed
-reaching its environment target, and no more than 5% degradation in time-to-target or normalized
-learning AUC on CartPole/Pendulum. CI smoke success alone is not M1 acceptance. The persisted final
-report must have status `GO`.
+**Go gate:** at least 2x valid-transition throughput over v1 on the controlled vector-batch
+benchmark, zero missing/duplicate/invalid rows, numerically equivalent outputs, every required
+learning seed reaching its environment target, and no more than 5% degradation in time-to-target
+or normalized learning AUC on CartPole/Pendulum. CI smoke success and hosted-runner screening do
+not constitute M1 acceptance. The persisted final report must have status `GO`.
 
-The default Python runtime now uses a node-level ready-descriptor queue rather than polling every
-Actor endpoint. The previous polling and per-Actor-thread implementations remain available only as
-regression subjects. This implementation change and the tuning-matrix script are not acceptance
-evidence. Until the two unchecked runs above complete on the documented pinned runner, M1 remains
-**not performance accepted**.
+The formal M1 subject is now the production local topology:
 
-A C++ atomic descriptor ring is conditional work, not an automatic next milestone. It is justified
-only when a controlled matrix with at least three repeats shows that every eight-or-more-Actor case
-remains below `1.0x` v1 throughput while all correctness gates pass. Otherwise continue tuning the
-Python event-driven path and batch configuration.
+```text
+C++/vectorized EnvRunner
+    -> one contiguous observation batch
+    -> VectorBatchInferenceRuntime
+    -> per-Actor/per-environment output views
+```
+
+Timing-based request aggregation remains supported for Python-thread and process-isolated fallback
+paths, but it is not used to prove the vectorized production topology. A C++ atomic descriptor ring
+is conditional fallback work only for process-isolated Actors after a controlled matrix proves that
+Python transport remains below v1; it is not required for the producer-defined vector-batch path.
 
 ## M2 — multi-node learner and control plane
 
@@ -66,9 +71,8 @@ Python event-driven path and batch configuration.
 **Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
 loss, and >=70% weak-scaling efficiency at the target topology.
 
-M2 code may be developed behind isolated interfaces while M1 evidence is collected, but M1 must
-not be marked performance-accepted or merged as such before `docs/M1_ACCEPTANCE.md` produces a
-`GO` report.
+M2 implementation is frozen until M1 produces a persisted `m1-final.json` with status `GO`, unless
+the user explicitly changes that ordering.
 
 ## M3 — algorithms and replay
 
@@ -83,7 +87,7 @@ mark the M3 algorithm-plugin architecture as complete.
 
 ## Stop/reconsider conditions
 
-Pause a custom runtime layer when a maintained external component meets all requirements with
-less integration risk. Do not rewrite tensor/autograd, NCCL, CUDA allocation or FSDP. A rewrite
-must demonstrate a material improvement in valid rows/s, time-to-target or total cost—not only a
-higher raw environment-step counter.
+Pause a custom runtime layer when a maintained external component meets all requirements with less
+integration risk. Do not rewrite tensor/autograd, NCCL, CUDA allocation or FSDP. A rewrite must
+demonstrate a material improvement in valid rows/s, time-to-target or total cost—not only a higher
+raw environment-step counter.
