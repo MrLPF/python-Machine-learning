@@ -54,7 +54,7 @@ def _trial(case: BufferCase, args: argparse.Namespace) -> dict[str, Any]:
     )
     report = run_m1_acceptance(
         config,
-        runtime_mode="in-process-batch",
+        runtime_mode=args.v2_runtime,
     )
     correctness = (
         report.legacy.audit.passed
@@ -65,6 +65,7 @@ def _trial(case: BufferCase, args: argparse.Namespace) -> dict[str, Any]:
     )
     return {
         "correctness_passed": correctness,
+        "v2_runtime": args.v2_runtime,
         "physical_actors": args.actors,
         "splits_per_actor": case.splits_per_actor,
         "logical_inference_clients": logical_clients,
@@ -128,6 +129,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-wait-ms", type=float, default=0.5)
     parser.add_argument("--model-seed", type=int, default=17)
     parser.add_argument("--checksum-tolerance", type=float, default=1e-6)
+    parser.add_argument(
+        "--v2-runtime",
+        choices=("in-process-batch", "vector-batch"),
+        default="in-process-batch",
+        help=(
+            "in-process-batch measures timing-based cross-Actor aggregation; vector-batch "
+            "measures the direct batched-sampling path for C++/vectorized EnvRunners."
+        ),
+    )
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--warmup-repeats", type=int, default=0)
     parser.add_argument("--controlled", action="store_true")
@@ -232,6 +242,7 @@ def main() -> None:
             "max_batch_items": args.max_batch_items,
             "min_batch_items": args.min_batch_items,
             "max_wait_ms": args.max_wait_ms,
+            "v2_runtime": args.v2_runtime,
             "repeats": args.repeats,
             "warmup_repeats": args.warmup_repeats,
         },
@@ -266,6 +277,7 @@ def main() -> None:
         json.dumps(
             {
                 "status": status,
+                "v2_runtime": args.v2_runtime,
                 "single_speedup": single["median_speedup"],
                 "double_speedup": double["median_speedup"],
                 "double_v2_gain": v2_gain,
