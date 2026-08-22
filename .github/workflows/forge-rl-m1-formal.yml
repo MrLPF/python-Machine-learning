@@ -61,7 +61,7 @@ jobs:
           })
           PY
           python -m pip install -e . --no-deps
-      - name: Run five-seed CartPole/Pendulum learning gate
+      - name: Run five-seed CartPole/Pendulum vector-batch learning gate
         working-directory: ForgeRL
         run: |
           taskset -c "$FORGERL_CPUSET" \
@@ -71,14 +71,55 @@ jobs:
               --device "${{ inputs.device }}" \
               --require-learning-gate \
               --output benchmarks/results/m1-learning-formal.json
-      - name: Run controlled synthetic and final M1 gate
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("benchmarks/results/m1-learning-formal.json").read_text())
+          if report.get("status") != "GO" or not report.get("learning_gate_passed"):
+              raise SystemExit("formal learning gate did not pass")
+          runtimes = {
+              run.get("runtime_metrics", {}).get("runtime")
+              for run in report.get("runs", [])
+              if run.get("subject") == "v2"
+          }
+          if runtimes != {"vector-batch-learning"}:
+              raise SystemExit(f"formal v2 learning used unexpected runtimes: {runtimes}")
+          PY
+      - name: Run controlled vector-batch stability gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_double_buffer.py \
+              --actors 8 --requests-per-actor 2000 --items-per-request 8 \
+              --width 64 --output-size 4 --max-batch-items 128 \
+              --min-batch-items 64 --max-wait-ms 0.5 \
+              --v2-runtime vector-batch \
+              --repeats 3 --warmup-repeats 1 --controlled \
+              --output benchmarks/results/m1-vector-batch-controlled.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("benchmarks/results/m1-vector-batch-controlled.json").read_text())
+          if report.get("status") != "DOUBLE_BUFFER_CANDIDATE":
+              raise SystemExit(f"vector-batch stability gate failed: {report.get('status')}")
+          if not report.get("formal_eligible") or not report.get("double_buffer_stable_two_x"):
+              raise SystemExit("vector-batch evidence is not formal and stable >=2x")
+          if not report.get("work_conservation", {}).get("identical"):
+              raise SystemExit("single/double-buffer work is not identical")
+          if not report.get("single_buffer", {}).get("correctness_passed"):
+              raise SystemExit("single-buffer correctness failed")
+          if not report.get("double_buffer", {}).get("correctness_passed"):
+              raise SystemExit("double-buffer correctness failed")
+          PY
+      - name: Run final vector-batch M1 gate
         working-directory: ForgeRL
         run: |
           taskset -c "$FORGERL_CPUSET" \
             python scripts/benchmark_m1_acceptance.py \
               --actors 8 --requests-per-actor 2000 --items-per-request 8 \
               --width 64 --max-batch-items 128 \
-              --v2-min-batch-items 32 --legacy-min-batch-items 1 \
+              --v2-min-batch-items 64 --legacy-min-batch-items 1 \
+              --v2-runtime vector-batch \
               --device "${{ inputs.device }}" \
               --throughput-gate 2.0 \
               --learning-report benchmarks/results/m1-learning-formal.json \
@@ -91,5 +132,6 @@ jobs:
           name: forgerl-m1-formal-evidence
           path: |
             ForgeRL/benchmarks/results/m1-learning-formal.json
+            ForgeRL/benchmarks/results/m1-vector-batch-controlled.json
             ForgeRL/benchmarks/results/m1-final.json
           if-no-files-found: warn
