@@ -41,8 +41,9 @@ from .rendezvous_in_process_inference import (
 )
 from .trajectory import TrajectoryBuilder, TrajectoryFragment
 from .transition import TransitionBatch, TransitionIdentityError
+from .vector_batch_inference import VectorBatchInferenceRuntime
 
-# The public in-process runtime now uses bounded Actor-wave rendezvous. The previous implementation
+# The public in-process runtime uses bounded arrival-aware batching. The previous implementation
 # remains available under an explicit regression-only name for controlled A/B measurements.
 InProcessBatchingInferenceRuntime = RendezvousInProcessBatchingInferenceRuntime
 
@@ -82,4 +83,5 @@ __all__ = [
     "TrajectoryFragment",
     "TransitionBatch",
     "TransitionIdentityError",
+    "VectorBatchInferenceRuntime",
 ]
