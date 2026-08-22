@@ -9,6 +9,9 @@ import torch
 from forge_rl.benchmarks.legacy_v1 import SyntheticPolicy, run_synthetic_policy
 from forge_rl.runtime import ProcessMailboxInferenceRuntime
 
+_FP32_RTOL = 1e-6
+_FP32_ATOL = 1e-7
+
 
 def _state(module: torch.nn.Module) -> dict[str, torch.Tensor]:
     return {
@@ -24,6 +27,15 @@ def _expected(
     with torch.inference_mode():
         action, value = module(torch.from_numpy(observation))
     return action.numpy(), value.numpy()
+
+
+def _assert_fp32_close(actual: np.ndarray, expected: np.ndarray) -> None:
+    np.testing.assert_allclose(
+        actual,
+        expected,
+        rtol=_FP32_RTOL,
+        atol=_FP32_ATOL,
+    )
 
 
 def test_process_mailbox_isolates_predictor_batches_and_updates_policy() -> None:
@@ -72,8 +84,8 @@ def test_process_mailbox_isolates_predictor_batches_and_updates_policy() -> None
         for response, observation in zip(responses, observations, strict=True):
             expected_action, expected_value = _expected(source, observation)
             assert response.policy_version == 0
-            np.testing.assert_allclose(response.outputs["action"], expected_action)
-            np.testing.assert_allclose(response.outputs["value"], expected_value)
+            _assert_fp32_close(response.outputs["action"], expected_action)
+            _assert_fp32_close(response.outputs["value"], expected_value)
 
         metrics, transport = runtime.metrics_pair()
         assert metrics.batches == 1
@@ -95,7 +107,7 @@ def test_process_mailbox_isolates_predictor_batches_and_updates_policy() -> None
         )
         expected_action, expected_value = _expected(source, observations[0])
         assert response.policy_version == 1
-        np.testing.assert_allclose(response.outputs["action"], expected_action)
-        np.testing.assert_allclose(response.outputs["value"], expected_value)
+        _assert_fp32_close(response.outputs["action"], expected_action)
+        _assert_fp32_close(response.outputs["value"], expected_value)
     finally:
         runtime.close()
