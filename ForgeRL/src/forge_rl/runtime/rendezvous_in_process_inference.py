@@ -29,7 +29,7 @@ class RendezvousInProcessBatchingInferenceRuntime(
         self,
         *args: Any,
         target_request_count: int | None = None,
-        hard_wait_multiplier: float = 2.0,
+        hard_wait_multiplier: float = 4.0,
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -95,7 +95,8 @@ class RendezvousInProcessBatchingInferenceRuntime(
             items += candidate.item_count
             contributors.add(candidate.actor_id)
 
-            # Debounce arrival jitter while preserving a fixed oldest-request latency budget.
+            # Debounce arrival jitter: while peer Actors keep arriving within one quiet interval,
+            # extend the coalescing opportunity, but never past the hard deadline.
             quiet_deadline = min(
                 hard_deadline,
                 time.monotonic() + self.max_wait_seconds,
