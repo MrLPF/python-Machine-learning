@@ -12,6 +12,7 @@ from forge_rl.runtime import (
     ActorLocalInferenceRuntime,
     InProcessBatchingInferenceRuntime,
     ProcessMailboxInferenceRuntime,
+    VectorBatchInferenceRuntime,
 )
 
 from .audit import audit_transition_identities
@@ -206,6 +207,87 @@ def _run_in_process_v2(
     )
 
 
+def _run_vector_batch_v2(
+    config: M1AcceptanceConfig,
+    state: Mapping[str, torch.Tensor],
+) -> RuntimeReport:
+    total_items = config.actors * config.items_per_request
+    if total_items > config.max_batch_items:
+        raise ValueError(
+            "vector-batch acceptance requires actors * items_per_request <= max_batch_items"
+        )
+    runtime = VectorBatchInferenceRuntime(
+        actor_count=config.actors,
+        module_type=SyntheticPolicy,
+        module_args=(config.width, config.output_size),
+        infer_fn=run_synthetic_policy,
+        state_dict=state,
+        policy_version=0,
+        max_batch_items=config.max_batch_items,
+        device=config.device,
+        amp_dtype=(
+            None if config.amp_dtype is None else getattr(torch, config.amp_dtype)
+        ),
+        copy_outputs=False,
+    )
+    runtime.start()
+    collected: list[tuple[int, int, int, int]] = []
+    trained: list[tuple[int, int, int, int]] = []
+    checksums = [0.0] * config.actors
+    tensor_bytes = [0] * config.actors
+    actor_counts = {
+        actor: config.items_per_request
+        for actor in range(config.actors)
+    }
+
+    started = time.perf_counter()
+    try:
+        for sequence in range(config.requests_per_actor):
+            batch = np.empty((total_items, config.width), dtype=np.float32)
+            observations: list[np.ndarray] = []
+            offset = 0
+            for actor in range(config.actors):
+                observation = _observation(config, actor, sequence)
+                observations.append(observation)
+                stop = offset + config.items_per_request
+                np.copyto(batch[offset:stop], observation, casting="no")
+                collected.extend(_identities(config, actor, sequence))
+                offset = stop
+            responses = runtime.infer_batch(
+                {"obs": batch},
+                actor_item_counts=actor_counts,
+                min_policy_version=0,
+            )
+            for actor, observation in enumerate(observations):
+                response = responses[actor]
+                if response.sequence_id != sequence:
+                    raise RuntimeError(
+                        f"vector-batch response sequence {response.sequence_id} != {sequence}"
+                    )
+                trained.extend(_identities(config, actor, response.sequence_id))
+                checksums[actor] += _checksum(response.outputs)
+                tensor_bytes[actor] += observation.nbytes + sum(
+                    value.nbytes for value in response.outputs.values()
+                )
+        elapsed = time.perf_counter() - started
+        metrics = runtime.metrics()
+        if runtime.last_error is not None:
+            raise RuntimeError(runtime.last_error)
+    finally:
+        runtime.close()
+
+    return _report(
+        name="forge_rl_v2_vector_batch",
+        config=config,
+        elapsed=elapsed,
+        collected=collected,
+        trained=trained,
+        checksums=checksums,
+        tensor_bytes=tensor_bytes,
+        metrics=metrics,
+    )
+
+
 def _run_process_mailbox_v2(
     config: M1AcceptanceConfig,
     state: Mapping[str, torch.Tensor],
@@ -322,8 +404,8 @@ def _evaluate(
             **_fingerprint(),
             "v2_runtime": runtime_name,
             "topology_selection": (
-                "threaded/C++ vector environments use zero-serialization in-process "
-                "batching; separate processes use mailbox transport"
+                "vectorized EnvRunners should submit one contiguous batch; threaded Actors may "
+                "use arrival-aware in-process batching; separate processes use mailbox transport"
             ),
         },
         legacy=legacy,
@@ -360,6 +442,18 @@ def run_in_process_m1_acceptance(
     )
 
 
+def run_vector_batch_m1_acceptance(
+    config: M1AcceptanceConfig,
+    learning_gate: LearningGate | None = None,
+) -> M1AcceptanceReport:
+    return _evaluate(
+        config,
+        learning_gate,
+        runtime_name="vector-batch",
+        runner=_run_vector_batch_v2,
+    )
+
+
 def run_process_mailbox_m1_acceptance(
     config: M1AcceptanceConfig,
     learning_gate: LearningGate | None = None,
@@ -385,8 +479,11 @@ def run_m1_acceptance(
         return run_actor_local_m1_acceptance(config, learning_gate)
     if selected == "in-process-batch":
         return run_in_process_m1_acceptance(config, learning_gate)
+    if selected == "vector-batch":
+        return run_vector_batch_m1_acceptance(config, learning_gate)
     if selected == "process-mailbox":
         return run_process_mailbox_m1_acceptance(config, learning_gate)
     raise ValueError(
-        "runtime_mode must be auto, actor-local, in-process-batch or process-mailbox"
+        "runtime_mode must be auto, actor-local, in-process-batch, vector-batch or "
+        "process-mailbox"
     )
