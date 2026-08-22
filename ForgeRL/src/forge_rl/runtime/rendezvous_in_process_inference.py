@@ -97,6 +97,28 @@ class RendezvousInProcessBatchingInferenceRuntime(
                     return
                 self._wave_condition.wait(remaining)
 
+    def _collect_batch(
+        self,
+        first: _InProcessRequest,
+    ) -> list[_InProcessRequest]:
+        """Consume exactly one ingress envelope.
+
+        The base implementation may read directly from the queue after draining ``_pending``.
+        That would expose the next sequence's envelope as if it were an individual request. The
+        rendezvous worker instead processes one atomic Actor wave at a time.
+        """
+
+        batch = [first]
+        items = first.item_count
+        while self._pending:
+            candidate = self._pending.popleft()
+            if items + candidate.item_count > self.max_batch_items:
+                self._pending.appendleft(candidate)
+                break
+            batch.append(candidate)
+            items += candidate.item_count
+        return batch
+
     def infer(
         self,
         actor_id: int,
