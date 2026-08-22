@@ -26,11 +26,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument(
         "--v2-runtime",
-        choices=("auto", "actor-local", "in-process-batch", "process-mailbox"),
+        choices=(
+            "auto",
+            "actor-local",
+            "in-process-batch",
+            "vector-batch",
+            "process-mailbox",
+        ),
         default="auto",
         help=(
-            "auto selects zero-serialization in-process batching for CPU and the "
-            "process mailbox for CUDA. Explicit modes are retained for controlled A/B."
+            "auto selects arrival-aware in-process batching for CPU and the process mailbox for "
+            "CUDA. vector-batch is the explicit C++/vectorized EnvRunner screening subject."
         ),
     )
     parser.add_argument(
