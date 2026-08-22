@@ -87,6 +87,21 @@ jobs:
             --v2-min-batch-items 32 --legacy-min-batch-items 1 \
             --max-wait-ms 0.5 --request-slots 8 --throughput-gate 0 \
             --output benchmarks/results/m1-target-scale-screening.json
+      - name: M1 double-buffer concurrency screening
+        if: matrix.python-version == '3.12'
+        working-directory: ForgeRL
+        env:
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+          NUMEXPR_NUM_THREADS: "1"
+        run: |
+          python scripts/benchmark_m1_double_buffer.py \
+            --actors 8 --requests-per-actor 1000 --items-per-request 8 \
+            --width 64 --output-size 4 --max-batch-items 128 \
+            --min-batch-items 64 --max-wait-ms 0.5 \
+            --repeats 1 --warmup-repeats 0 \
+            --output benchmarks/results/m1-double-buffer-screening.json
       - name: Upload M1 acceptance smoke report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
@@ -107,6 +122,13 @@ jobs:
         with:
           name: forgerl-m1-target-scale-screening
           path: ForgeRL/benchmarks/results/m1-target-scale-screening.json
+          if-no-files-found: error
+      - name: Upload M1 double-buffer screening report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-double-buffer-screening
+          path: ForgeRL/benchmarks/results/m1-double-buffer-screening.json
           if-no-files-found: error
 
   distributed:
