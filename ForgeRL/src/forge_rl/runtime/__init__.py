@@ -1,5 +1,6 @@
 """ForgeRL v2 runtime contracts and local reference implementations."""
 
+from .actor_local_inference import ActorLocalInferenceRuntime
 from .coordinator import InMemoryCoordinator, NodeLease, NodeRole
 from .dynamic_batcher import BatchEnvelope, DeadlineBatcher
 from .event_driven_inference import (
@@ -36,6 +37,7 @@ from .trajectory import TrajectoryBuilder, TrajectoryFragment
 from .transition import TransitionBatch, TransitionIdentityError
 
 __all__ = [
+    "ActorLocalInferenceRuntime",
     "BatchEnvelope",
     "DeadlineBatcher",
     "DoubleBufferedPolicyReplica",

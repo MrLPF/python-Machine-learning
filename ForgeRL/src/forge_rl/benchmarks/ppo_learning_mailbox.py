@@ -7,12 +7,71 @@ from typing import Mapping
 import numpy as np
 import torch
 
-from forge_rl.runtime import ProcessMailboxInferenceRuntime
+from forge_rl.runtime import (
+    ActorLocalInferenceRuntime,
+    ProcessMailboxInferenceRuntime,
+)
 
 from .legacy_v1 import ReferencePPOPolicy, run_synthetic_policy
 from . import ppo_learning as _base
 
 _PATCH_LOCK = threading.Lock()
+
+
+class _ActorLocalLearningRuntime:
+    """Learning-harness adapter for the small-policy CPU fast path."""
+
+    def __init__(
+        self,
+        *,
+        actor_count: int,
+        observation_size: int,
+        action_size: int,
+        hidden_size: int,
+        state_dict: Mapping[str, torch.Tensor],
+        config: _base.LearningBenchmarkConfig,
+    ) -> None:
+        if config.device != "cpu":
+            raise ValueError("actor-local learning runtime supports CPU only")
+        self.runtime = ActorLocalInferenceRuntime(
+            actor_count=actor_count,
+            module_type=ReferencePPOPolicy,
+            module_args=(observation_size, action_size, hidden_size),
+            infer_fn=run_synthetic_policy,
+            state_dict=state_dict,
+            policy_version=0,
+            max_batch_items=config.envs_per_actor,
+            copy_outputs=False,
+        )
+        self.runtime.start()
+
+    def infer(
+        self,
+        actor_id: int,
+        observation: np.ndarray,
+        *,
+        min_policy_version: int,
+    ) -> tuple[dict[str, np.ndarray], int]:
+        response = self.runtime.infer(
+            actor_id,
+            {"obs": np.ascontiguousarray(observation, dtype=np.float32)},
+            min_policy_version=min_policy_version,
+        )
+        return response.outputs, response.policy_version
+
+    def update(self, state_dict: Mapping[str, torch.Tensor], version: int) -> int:
+        return self.runtime.update_policy(state_dict, version=version)
+
+    def metrics(self) -> dict[str, float | int | str]:
+        return {
+            **asdict(self.runtime.metrics()),
+            "runtime": "actor-local-cpu",
+            "policy_replicas": self.runtime.actor_count,
+            "parameter_count_per_replica": self.runtime.parameter_count,
+        }
+
+    def close(self) -> None:
+        self.runtime.close()
 
 
 class _ProcessMailboxLearningRuntime:
@@ -91,9 +150,16 @@ class _ProcessMailboxLearningRuntime:
 def run_learning_benchmark(
     config: _base.LearningBenchmarkConfig,
 ) -> _base.LearningBenchmarkReport:
+    """Run identical PPO mathematics with a workload-appropriate v2 topology."""
+
+    runtime_class = (
+        _ActorLocalLearningRuntime
+        if config.device == "cpu"
+        else _ProcessMailboxLearningRuntime
+    )
     with _PATCH_LOCK:
         previous = _base._SharedLearningRuntime
-        _base._SharedLearningRuntime = _ProcessMailboxLearningRuntime
+        _base._SharedLearningRuntime = runtime_class
         try:
             return _base.run_learning_benchmark(config)
         finally:

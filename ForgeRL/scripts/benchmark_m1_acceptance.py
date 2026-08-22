@@ -10,7 +10,7 @@ from forge_rl.benchmarks import LearningGate, M1AcceptanceConfig, run_m1_accepta
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare the frozen ForgeRL v1 queue data plane with the ForgeRL v2 M1 runtime."
+        description="Compare the frozen ForgeRL v1 queue data plane with a ForgeRL v2 runtime."
     )
     parser.add_argument("--actors", type=int, default=4)
     parser.add_argument("--requests-per-actor", type=int, default=250)
@@ -25,6 +25,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-seed", type=int, default=17)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument(
+        "--v2-runtime",
+        choices=("auto", "actor-local", "process-mailbox"),
+        default="auto",
+        help=(
+            "auto selects actor-local inference for CPU policies and the process mailbox "
+            "for CUDA. Explicit modes are retained for controlled topology A/B."
+        ),
+    )
+    parser.add_argument(
         "--amp-dtype",
         choices=("float16", "bfloat16"),
         help="Optional CUDA autocast dtype; omit for full precision.",
@@ -34,7 +43,7 @@ def parse_args() -> argparse.Namespace:
         "--throughput-gate",
         type=float,
         default=2.0,
-        help="Required v2/v1 valid-row throughput ratio. Use 0 for CI correctness smoke only.",
+        help="Required v2/v1 valid-row throughput ratio. Use 0 for CI screening only.",
     )
     parser.add_argument(
         "--learning-report",
@@ -70,7 +79,11 @@ def main() -> None:
         amp_dtype=args.amp_dtype,
     )
     learning_gate = LearningGate.load(args.learning_report) if args.learning_report else None
-    report = run_m1_acceptance(config, learning_gate=learning_gate)
+    report = run_m1_acceptance(
+        config,
+        learning_gate=learning_gate,
+        runtime_mode=args.v2_runtime,
+    )
     payload = report.to_dict()
     rendered = json.dumps(payload, indent=2, sort_keys=True)
     print(rendered)

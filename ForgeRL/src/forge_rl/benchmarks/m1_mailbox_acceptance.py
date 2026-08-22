@@ -3,12 +3,12 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 import math
 import time
-from typing import Mapping
+from typing import Callable, Mapping
 
 import numpy as np
 import torch
 
-from forge_rl.runtime import ProcessMailboxInferenceRuntime
+from forge_rl.runtime import ActorLocalInferenceRuntime, ProcessMailboxInferenceRuntime
 
 from .audit import audit_transition_identities
 from .legacy_v1 import SyntheticPolicy, run_synthetic_policy
@@ -23,6 +23,69 @@ from .m1_acceptance import (
     _observation,
     _run_legacy,
 )
+
+
+def _run_actor_local_v2(
+    config: M1AcceptanceConfig,
+    state: Mapping[str, torch.Tensor],
+) -> RuntimeReport:
+    runtime = ActorLocalInferenceRuntime(
+        actor_count=config.actors,
+        module_type=SyntheticPolicy,
+        module_args=(config.width, config.output_size),
+        infer_fn=run_synthetic_policy,
+        state_dict=state,
+        policy_version=0,
+        max_batch_items=config.items_per_request,
+        copy_outputs=False,
+    )
+    runtime.start()
+    collected: list[tuple[int, int, int, int]] = []
+    trained: list[tuple[int, int, int, int]] = []
+    checksums = [0.0] * config.actors
+
+    def actor_loop(actor: int) -> None:
+        total = 0.0
+        for sequence in range(config.requests_per_actor):
+            observation = _observation(config, actor, sequence)
+            collected.extend(_identities(config, actor, sequence))
+            response = runtime.infer(
+                actor,
+                {"obs": observation},
+                min_policy_version=0,
+            )
+            trained.extend(_identities(config, actor, response.sequence_id))
+            total += _checksum(response.outputs)
+        checksums[actor] = total
+
+    started = time.perf_counter()
+    try:
+        with ThreadPoolExecutor(max_workers=config.actors) as pool:
+            list(pool.map(actor_loop, range(config.actors)))
+        elapsed = time.perf_counter() - started
+        metrics = runtime.metrics()
+    finally:
+        runtime.close()
+
+    audit = audit_transition_identities(collected, trained)
+    return RuntimeReport(
+        "forge_rl_v2_actor_local_cpu",
+        elapsed,
+        config.actors * config.requests_per_actor,
+        config.actors * config.requests_per_actor * config.items_per_request,
+        audit.unique_trained_rows / elapsed,
+        metrics.batches,
+        metrics.mean_batch_items,
+        metrics.batch_fill_ratio,
+        metrics.latency_p50_ms,
+        metrics.latency_p95_ms,
+        metrics.latency_p99_ms,
+        metrics.errors,
+        0,
+        0,
+        float(math.fsum(checksums)),
+        audit,
+    )
 
 
 def _run_process_mailbox_v2(
@@ -107,11 +170,18 @@ def _run_process_mailbox_v2(
     )
 
 
-def run_m1_acceptance(
+def _evaluate(
     config: M1AcceptanceConfig,
-    learning_gate: LearningGate | None = None,
+    learning_gate: LearningGate | None,
+    *,
+    runtime_name: str,
+    runner: Callable[
+        [M1AcceptanceConfig, Mapping[str, torch.Tensor]], RuntimeReport
+    ],
 ) -> M1AcceptanceReport:
     config.validate()
+    if runtime_name == "actor-local" and config.device != "cpu":
+        raise ValueError("actor-local M1 runtime supports CPU only")
     torch.set_num_threads(1)
     try:
         torch.set_num_interop_threads(1)
@@ -124,7 +194,7 @@ def run_m1_acceptance(
         for name, value in model.state_dict().items()
     }
     legacy = _run_legacy(config, state)
-    v2 = _run_process_mailbox_v2(config, state)
+    v2 = runner(config, state)
     speedup = v2.valid_rows_per_second / legacy.valid_rows_per_second
     scale = max(1.0, abs(legacy.output_checksum), abs(v2.output_checksum))
     checksum_error = abs(v2.output_checksum - legacy.output_checksum) / scale
@@ -156,7 +226,11 @@ def run_m1_acceptance(
         config=config,
         environment={
             **_fingerprint(),
-            "v2_runtime": "process-isolated-persistent-mailbox",
+            "v2_runtime": runtime_name,
+            "topology_selection": (
+                "small CPU policies run beside Actors; central mailbox remains "
+                "available for CUDA or explicitly selected workloads"
+            ),
         },
         legacy=legacy,
         v2=v2,
@@ -165,4 +239,46 @@ def run_m1_acceptance(
         learning_gate=learning_gate,
         status=status,
         reasons=reasons,
+    )
+
+
+def run_actor_local_m1_acceptance(
+    config: M1AcceptanceConfig,
+    learning_gate: LearningGate | None = None,
+) -> M1AcceptanceReport:
+    return _evaluate(
+        config,
+        learning_gate,
+        runtime_name="actor-local",
+        runner=_run_actor_local_v2,
+    )
+
+
+def run_process_mailbox_m1_acceptance(
+    config: M1AcceptanceConfig,
+    learning_gate: LearningGate | None = None,
+) -> M1AcceptanceReport:
+    return _evaluate(
+        config,
+        learning_gate,
+        runtime_name="process-mailbox",
+        runner=_run_process_mailbox_v2,
+    )
+
+
+def run_m1_acceptance(
+    config: M1AcceptanceConfig,
+    learning_gate: LearningGate | None = None,
+    *,
+    runtime_mode: str = "process-mailbox",
+) -> M1AcceptanceReport:
+    selected = runtime_mode
+    if selected == "auto":
+        selected = "actor-local" if config.device == "cpu" else "process-mailbox"
+    if selected == "actor-local":
+        return run_actor_local_m1_acceptance(config, learning_gate)
+    if selected == "process-mailbox":
+        return run_process_mailbox_m1_acceptance(config, learning_gate)
+    raise ValueError(
+        "runtime_mode must be auto, actor-local or process-mailbox"
     )
