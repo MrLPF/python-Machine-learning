@@ -1,141 +1,132 @@
 # M1 acceptance procedure
 
-M1 is accepted only after **correctness**, **synthetic data-plane throughput**, and **learning
-quality** pass on the same controlled hardware. A fast microbenchmark, a normal hosted CI run, or
-the existence of an acceptance script cannot produce a `GO` decision.
+M1 is accepted only after **correctness**, **stable synthetic throughput**, and **learning quality**
+pass on the same controlled hardware. Hosted CI, a fast microbenchmark, or the existence of an
+acceptance script cannot produce `GO`.
 
 ## Frozen v1 reference
 
-The user-provided source archive is identified by `benchmarks/legacy_v1_manifest.json`. The
-repository publishes only a benchmark-oriented behavioral reference of the v1 central predictor
-data path:
+The user-provided source archive is identified by `benchmarks/legacy_v1_manifest.json`. The v1
+benchmark subject remains:
 
 ```text
-actor NumPy payload
+Actor NumPy payload
   -> multiprocessing.Queue / pickle
   -> central predictor process
-  -> per-actor multiprocessing.Queue / pickle
+  -> per-Actor multiprocessing.Queue / pickle
 ```
 
-Simulator-specific and domain adapters are intentionally excluded. The manifest records the
-archive and relevant source-file SHA-256 digests so the baseline cannot be silently changed.
+The learning-only policy-update control message is acknowledged between rollout rounds and does
+not change the frozen transport being measured.
 
-For the learning gate, the frozen data plane accepts an atomic policy-update control message. The
-update is acknowledged only after a complete state dict has loaded between rollout rounds. This is
-required to train v1 and v2 with the same PPO core; it does not change the frozen Queue/pickle
-inference transport being measured.
+## Formal v2 subject
 
-## Current v2 local inference subject
-
-The default v2 subject now routes compact request descriptors through one node-level event-driven
-queue. Request and response tensors remain in generation-protected shared-memory slots. The first
-notification blocks the collector; subsequent ready descriptors are drained in a bounded burst.
-This replaces the previous endpoint-by-endpoint empty-poll loop while retaining exactly one
-collector and one inference worker.
-
-The prior implementations remain available only for regression comparison:
+The formal local v2 subject is the production vectorized topology:
 
 ```text
-PollingNodeLocalInferenceService
-ThreadedNodeLocalInferenceService
+C++/vectorized EnvRunner
+  -> one contiguous observation batch
+  -> VectorBatchInferenceRuntime
+  -> one policy forward
+  -> per-Actor/per-environment output views
 ```
 
-The event-driven queue is validated from normal Actor threads and from a spawned Actor process.
-Stale descriptors are counted and ignored; an unknown Actor or Actor-metadata mismatch is treated
-as an explicit runtime protocol error rather than a valid transition.
+Batch membership is producer-defined. It does not depend on Python Actor arrival order, a timing
+window, or reconstructing a batch after requests cross an IPC boundary. The runtime preserves:
 
-## Synthetic acceptance benchmark
+- monotonic policy versions and atomic active/staging switches;
+- one sequence ID per Actor wave;
+- CPU/CUDA and optional CUDA AMP execution;
+- explicit output partition checks;
+- batch, item, error and latency metrics.
 
-`benchmark_m1_acceptance.py` executes the same deterministic PyTorch model, observations, request
-identities, Actor count, device and precision through:
+Event-driven shared-memory, polling, rendezvous and process-mailbox paths remain regression or
+fallback subjects. They do not replace the vector-batch subject in the final M1 report.
 
-1. `LegacyV1InferenceRuntime`, using the frozen Queue/pickle path;
-2. the default event-driven `NodeLocalInferenceService`, using shared-memory tensor channels and
-   cross-Actor batching.
+## Correctness gates
 
-It reports valid rows/s, v2/v1 speedup, transition identity errors, output equivalence,
-p50/p95/p99 latency, batch fill, data-movement counters and the software/hardware fingerprint.
+Every formal synthetic and learning run must satisfy:
 
-A normal-CI correctness smoke deliberately disables the speed gate:
-
-```bash
-python scripts/benchmark_m1_acceptance.py \
-  --actors 2 --requests-per-actor 8 --items-per-request 2 \
-  --width 16 --max-batch-items 8 \
-  --v2-min-batch-items 4 --legacy-min-batch-items 1 \
-  --throughput-gate 0 \
-  --output benchmarks/results/m1-acceptance-smoke.json
+```text
+missing valid rows = 0
+duplicate collected rows = 0
+duplicate trained rows = 0
+unexpected trained rows = 0
+invalid infrastructure rows in loss = 0
+useful sample ratio = 1.0
+runtime errors = 0
 ```
 
-The controlled synthetic gate uses the documented M1 threshold:
+FP32 batched and sliced forward passes are compared with explicit floating-point tolerances rather
+than bitwise equality. Shape, finite values, policy version, sequence identity and transition
+identity remain exact checks.
+
+The reference C++ pipeline test covers:
+
+```text
+CppVectorEnv.step
+  -> VectorBatchInferenceRuntime
+  -> TransitionBatch
+  -> OnPolicyExperienceQueue
+  -> one PPO optimizer update
+  -> policy version refresh
+```
+
+## Synthetic throughput gate
+
+The one-run final subject is invoked explicitly:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
 python scripts/benchmark_m1_acceptance.py \
   --actors 8 --requests-per-actor 2000 --items-per-request 8 \
   --width 64 --max-batch-items 128 \
-  --v2-min-batch-items 32 --legacy-min-batch-items 1 \
+  --v2-min-batch-items 64 --legacy-min-batch-items 1 \
+  --v2-runtime vector-batch \
   --throughput-gate 2.0 \
   --output benchmarks/results/m1-acceptance-synthetic.json
 ```
 
-Hosted-runner measurements are regression signals only. The formal result must be repeated on a
-pinned image with fixed CPU affinity, thread counts, PyTorch/Gymnasium versions and power settings.
-Both subjects use the same device and precision.
-
-## Controlled tuning before C++ escalation
-
-The event-driven path must be measured across the documented workload matrix before implementing a
-custom C++ queue. A CI smoke validates the matrix runner and JSON schema but is never formal:
-
-```bash
-python scripts/benchmark_m1_tuning_matrix.py \
-  --preset smoke --repeats 1 --warmup-repeats 0 \
-  --requests-per-actor 8 \
-  --output benchmarks/results/m1-tuning-matrix-smoke.json
-```
-
-The pinned screening command is:
+Before the final one-run gate, the controlled runner must demonstrate stability with one warmup and
+at least three measured repeats:
 
 ```bash
 taskset -c "$FORGERL_CPUSET" \
-  python scripts/benchmark_m1_tuning_matrix.py \
-    --preset controlled --controlled \
-    --repeats 3 --warmup-repeats 1 \
-    --requests-per-actor 1000 \
-    --output benchmarks/results/m1-tuning-matrix-controlled.json
+  python scripts/benchmark_m1_double_buffer.py \
+    --actors 8 --requests-per-actor 2000 --items-per-request 8 \
+    --width 64 --output-size 4 --max-batch-items 128 \
+    --min-batch-items 64 --max-wait-ms 0.5 \
+    --v2-runtime vector-batch \
+    --repeats 3 --warmup-repeats 1 --controlled \
+    --output benchmarks/results/m1-vector-batch-controlled.json
 ```
 
-Each case runs the complete v1/v2 correctness and numerical-equivalence checks. A stable
-`>=2.0x` case with speedup coefficient of variation `<=0.10` becomes a candidate for the fixed
-formal gate; it does not itself produce `GO`.
-
-A C++ atomic descriptor ring is the next M1 experiment only when all of these conditions hold:
+The controlled report must show:
 
 ```text
-controlled pinned run
-at least three measured repeats per case
-all transition and numerical gates pass
-all cases with actors >= 8 have median v2/v1 speedup < 1.0
-matrix status == CPP_DESCRIPTOR_RING_RECOMMENDED
+status = DOUBLE_BUFFER_CANDIDATE
+formal_eligible = true
+double_buffer_stable_two_x = true
+speedup coefficient of variation <= 0.10
+identical total valid work for compared cases
+all correctness gates pass
 ```
 
-Otherwise the project continues tuning the Python event-driven path. This stop/go rule prevents a
-C++ rewrite based on a noisy hosted-runner result or one undersized workload.
+Hosted-runner results remain screening signals only.
 
 ## Learning-quality gate
 
-`benchmark_m1_learning.py` supplies the executable evidence generator. It uses one
-`ReferencePPOPolicy`, one PPO loss implementation, identical initial weights, identical GAE,
-identical minibatch order, identical rollout budget and deterministic per-Actor action RNGs for
-both subjects. The intentional difference is only the inference data plane.
+`benchmark_m1_learning.py` uses one PPO implementation, identical initial weights, GAE, minibatch
+order, rollout budget and per-Actor random-number streams for v1 and v2. The v2 subject uses the
+same `VectorBatchInferenceRuntime` as the synthetic gate. Actor threads write into fixed slices of
+one contiguous wave buffer; a barrier action performs exactly one vector-batch forward.
 
-Supported reference environments are:
+Reference environments:
 
-- `CartPole-v1`: categorical policy, target mean return `475`;
-- `Pendulum-v1`: tanh-squashed Gaussian policy, target mean return `-200`.
+- `CartPole-v1`: target mean return `475`;
+- `Pendulum-v1`: target mean return `-200`.
 
-The GAE boundary rules are:
+GAE boundary rules:
 
 ```text
 terminated -> no value bootstrap and stop recursion
@@ -143,26 +134,7 @@ truncated  -> bootstrap from final observation but stop recursion
 runtime fault -> invalid row; never enter target, advantage or loss
 ```
 
-Each run records unique transition identities, policy versions, valid collected/trained rows,
-inference metrics, evaluation curves, first time-to-target and normalized learning AUC. Training
-continues for the full fixed budget after first reaching the target so AUC comparisons use equal
-budgets.
-
-### Normal-CI plumbing smoke
-
-```bash
-python scripts/benchmark_m1_learning.py \
-  --smoke \
-  --seeds 7 \
-  --environments CartPole-v1,Pendulum-v1 \
-  --device cpu \
-  --output benchmarks/results/m1-learning-smoke.json
-```
-
-Smoke mode uses one seed and a tiny update budget. It can return only `SMOKE_PASS` or a failure;
-its report sets `formal_eligible=false` and cannot satisfy the final M1 gate.
-
-### Formal five-seed run
+Formal command:
 
 ```bash
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
@@ -174,7 +146,7 @@ python scripts/benchmark_m1_learning.py \
   --output benchmarks/results/m1-learning-formal.json
 ```
 
-For each environment, formal acceptance requires:
+For each environment:
 
 ```text
 paired seeds >= 5
@@ -182,37 +154,35 @@ all required v1 seeds reach the target
 all required v2 seeds reach the target
 v2 median time-to-target <= 1.05 * v1 median time-to-target
 v2 median normalized AUC >= 0.95 * v1 median normalized AUC
-transition and policy-version audits pass for every run
+all transition and policy-version audits pass
+all v2 runtime records identify vector-batch-learning
 ```
 
-The JSON keeps the compatibility fields consumed by `LearningGate`, plus detailed target-reach
-counts and per-seed evidence. A failed or censored seed is not presented as a successful
-time-to-target observation.
+A censored seed is not reported as a successful time-to-target observation.
 
 ## Pinned formal workflow
 
-`.github/workflows/forge-rl-m1-formal.yml` is a manual workflow restricted to a self-hosted runner
-with labels:
+`.github/workflows/forge-rl-m1-formal.yml` is a manual workflow restricted to:
 
 ```text
 self-hosted, linux, x64, forgerl-benchmark
 ```
 
-The runner must already contain the pinned Python/PyTorch/NumPy/Gymnasium environment and define
-`FORGERL_CPUSET`. Optional `FORGERL_EXPECTED_TORCH` and `FORGERL_EXPECTED_GYMNASIUM` values make
-version drift fatal. The workflow does not replace the runner's Python installation.
+The runner must define `FORGERL_CPUSET` and contain the pinned Python, PyTorch, NumPy and Gymnasium
+environment. Optional expected-version variables make drift fatal.
 
-It executes, in order:
+The workflow executes on the same runner and CPU affinity:
 
-1. the formal five-seed learning gate;
-2. the controlled synthetic `>=2x` gate;
-3. `benchmark_m1_acceptance.py --learning-report ... --require-go`;
-4. upload of `m1-learning-formal.json` and `m1-final.json`, including on failure.
+1. five-seed CartPole/Pendulum vector-batch learning gate;
+2. three-repeat controlled vector-batch stability gate;
+3. final vector-batch synthetic gate with the learning report attached;
+4. upload of `m1-learning-formal.json`, `m1-vector-batch-controlled.json` and `m1-final.json`.
 
-The final command is equivalent to:
+The final command uses:
 
 ```bash
 python scripts/benchmark_m1_acceptance.py \
+  --v2-runtime vector-batch \
   --throughput-gate 2.0 \
   --learning-report benchmarks/results/m1-learning-formal.json \
   --require-go \
@@ -230,5 +200,5 @@ python scripts/benchmark_m1_acceptance.py \
 | `FAIL_LEARNING_GATE` | target reach, time-to-target or normalized AUC gate failed |
 | `GO` | all documented M1 gates passed on the pinned runner |
 
-M2 may be developed behind isolated interfaces, but the project must not describe M1 as
-performance accepted until a persisted `m1-final.json` has status `GO`.
+M1 is not performance accepted until a persisted `m1-final.json` has status `GO`. M2 remains
+frozen unless the user explicitly changes the milestone order.
