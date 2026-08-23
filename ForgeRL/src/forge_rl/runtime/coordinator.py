@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 import threading
 import time
@@ -13,6 +13,18 @@ class NodeRole(StrEnum):
     EXPERIENCE = "experience"
     LEARNER = "learner"
     EVALUATOR = "evaluator"
+
+
+class NodeNotFoundError(KeyError):
+    """Raised when a control-plane request references an unknown node."""
+
+
+class StaleGenerationError(RuntimeError):
+    """Raised when an older process instance attempts to refresh a newer lease."""
+
+
+class PolicyVersionConflictError(ValueError):
+    """Raised when a policy publication is not strictly monotonic."""
 
 
 @dataclass(slots=True)
@@ -32,13 +44,14 @@ class NodeLease:
 
 
 class InMemoryCoordinator:
-    """Reference control-plane implementation used by tests and local mode."""
+    """Thread-safe control-plane state used by local and networked coordinators."""
 
     def __init__(self, *, lease_seconds: float = 10.0) -> None:
         if lease_seconds <= 0:
             raise ValueError("lease_seconds must be positive")
         self.lease_seconds = float(lease_seconds)
         self._nodes: dict[str, NodeLease] = {}
+        self._generations: dict[str, int] = {}
         self._policy_version = -1
         self._lock = threading.RLock()
 
@@ -51,7 +64,7 @@ class InMemoryCoordinator:
         with self._lock:
             selected = int(version)
             if selected <= self._policy_version:
-                raise ValueError(
+                raise PolicyVersionConflictError(
                     f"policy version must increase: current={self._policy_version}, new={selected}"
                 )
             self._policy_version = selected
@@ -70,8 +83,8 @@ class InMemoryCoordinator:
             raise ValueError("node_id and endpoint are required")
         normalized_role = role if isinstance(role, NodeRole) else NodeRole(role)
         with self._lock:
-            previous = self._nodes.get(node_id)
-            generation = 0 if previous is None else previous.generation + 1
+            generation = self._generations.get(node_id, -1) + 1
+            self._generations[node_id] = generation
             now = time.monotonic()
             lease = NodeLease(
                 node_id=node_id,
@@ -88,9 +101,12 @@ class InMemoryCoordinator:
 
     def heartbeat(self, node_id: str, *, generation: int) -> NodeLease:
         with self._lock:
-            lease = self._nodes[node_id]
+            try:
+                lease = self._nodes[node_id]
+            except KeyError as error:
+                raise NodeNotFoundError(node_id) from error
             if lease.generation != int(generation):
-                raise RuntimeError(
+                raise StaleGenerationError(
                     f"stale heartbeat generation for {node_id}: "
                     f"expected {lease.generation}, got {generation}"
                 )
