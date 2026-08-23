@@ -35,7 +35,7 @@
 - [x] Align the PPO learning-quality subject with the same `vector-batch` runtime.
 - [x] Close the reference C++ VectorEnv -> vector-batch -> TransitionBatch -> ExperienceQueue -> PPO update loop.
 - [x] Use explicit FP32 tolerances for batched-versus-sliced numerical checks on Python 3.11/3.12.
-- [ ] Run the controlled stable >=2x vector-batch throughput gate on the pinned runner.
+- [ ] Run the controlled stable >=2x vector-batch throughput gate on the user's pinned local runner.
 - [ ] Run the formal five-seed CartPole/Pendulum time-to-target and normalized-AUC gates on the same runner.
 - [ ] Persist an `m1-final.json` report whose status is `GO`.
 
@@ -45,7 +45,7 @@ learning seed reaching its environment target, and no more than 5% degradation i
 or normalized learning AUC on CartPole/Pendulum. CI smoke success and hosted-runner screening do
 not constitute M1 acceptance. The persisted final report must have status `GO`.
 
-The formal M1 subject is now the production local topology:
+The formal M1 subject is the production local topology:
 
 ```text
 C++/vectorized EnvRunner
@@ -54,16 +54,15 @@ C++/vectorized EnvRunner
     -> per-Actor/per-environment output views
 ```
 
-Timing-based request aggregation remains supported for Python-thread and process-isolated fallback
-paths, but it is not used to prove the vectorized production topology. A C++ atomic descriptor ring
-is conditional fallback work only for process-isolated Actors after a controlled matrix proves that
-Python transport remains below v1; it is not required for the producer-defined vector-batch path.
+M1 implementation and standard CI are complete. Formal `GO` validation remains pending and will be
+run by the user on local pinned hardware. M1 must not be described as formally accepted before that
+report exists.
 
 ## M2 — multi-node learner and control plane
 
 - [x] DDP context/wrapping utilities.
 - [x] Coordinator lease model.
-- [ ] Networked coordinator service.
+- [x] Networked coordinator service.
 - [ ] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
 - [ ] Distributed checkpoint with topology-independent restore.
 - [ ] Failure injection: actor, inference replica and learner-rank restart.
@@ -71,8 +70,9 @@ Python transport remains below v1; it is not required for the producer-defined v
 **Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
 loss, and >=70% weak-scaling efficiency at the target topology.
 
-M2 implementation is frozen until M1 produces a persisted `m1-final.json` with status `GO`, unless
-the user explicitly changes that ordering.
+The user explicitly authorized M2 implementation while retaining M1 as `formal validation pending`.
+The networked coordinator carries control metadata only; tensor and trajectory payloads must use
+direct data channels.
 
 ## M3 — algorithms and replay
 
