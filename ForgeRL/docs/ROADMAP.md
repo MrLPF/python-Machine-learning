@@ -64,7 +64,7 @@ report exists.
 - [x] Coordinator lease model.
 - [x] Networked coordinator service.
 - [x] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
-- [ ] Distributed checkpoint with topology-independent restore.
+- [x] Distributed checkpoint with topology-independent restore.
 - [ ] Failure injection: actor, inference replica and learner-rank restart.
 
 **Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
@@ -74,6 +74,9 @@ The user explicitly authorized M2 implementation while retaining M1 as `formal v
 The coordinator carries control metadata only. `NetworkExperienceService` and
 `NetworkPolicyService` expose direct authenticated TCP channels with bounded frames, payload
 integrity checks, request-ID idempotency, experience backpressure and monotonic policy versions.
+`DistributedCheckpointManager` uses PyTorch Distributed Checkpoint for parallel shard I/O and
+load-time resharding, while a ForgeRL JSON manifest provides an atomic completion boundary and
+records the global step, policy version and saved world size.
 
 ## M3 — algorithms and replay
 
