@@ -1,7 +1,14 @@
-"""ForgeRL v2 runtime contracts and local reference implementations."""
+"""ForgeRL v2 runtime contracts and reference implementations."""
 
 from .actor_local_inference import ActorLocalInferenceRuntime
-from .coordinator import InMemoryCoordinator, NodeLease, NodeRole
+from .coordinator import (
+    InMemoryCoordinator,
+    NodeLease,
+    NodeNotFoundError,
+    NodeRole,
+    PolicyVersionConflictError,
+    StaleGenerationError,
+)
 from .dynamic_batcher import BatchEnvelope, DeadlineBatcher
 from .event_driven_inference import (
     EventDrivenInferenceMetricsSnapshot,
@@ -29,6 +36,12 @@ from .mailbox_inference import (
     MailboxNodeLocalInferenceService,
     MailboxTransportMetricsSnapshot,
 )
+from .network_coordinator import (
+    CoordinatorHTTPError,
+    NetworkCoordinatorClient,
+    NetworkCoordinatorService,
+    RemoteNodeLease,
+)
 from .optimized_inference import (
     NodeLocalInferenceService as PollingNodeLocalInferenceService,
     OptimizedInferenceMetricsSnapshot,
@@ -50,6 +63,7 @@ InProcessBatchingInferenceRuntime = RendezvousInProcessBatchingInferenceRuntime
 __all__ = [
     "ActorLocalInferenceRuntime",
     "BatchEnvelope",
+    "CoordinatorHTTPError",
     "DeadlineBatcher",
     "DoubleBufferedPolicyReplica",
     "EventDrivenInferenceMetricsSnapshot",
@@ -66,18 +80,24 @@ __all__ = [
     "MailboxInferenceEndpoint",
     "MailboxNodeLocalInferenceService",
     "MailboxTransportMetricsSnapshot",
+    "NetworkCoordinatorClient",
+    "NetworkCoordinatorService",
     "NodeLease",
     "NodeLocalInferenceService",
+    "NodeNotFoundError",
     "NodeRole",
     "OnPolicyExperienceQueue",
     "OptimizedInferenceMetricsSnapshot",
     "PolicyRegistry",
     "PolicySnapshot",
+    "PolicyVersionConflictError",
     "PollingNodeLocalInferenceService",
     "ProcessMailboxInferenceRuntime",
+    "RemoteNodeLease",
     "RendezvousInProcessBatchingInferenceRuntime",
     "SharedInferenceClient",
     "SharedInferenceEndpoint",
+    "StaleGenerationError",
     "ThreadedNodeLocalInferenceService",
     "TrajectoryBuilder",
     "TrajectoryFragment",
