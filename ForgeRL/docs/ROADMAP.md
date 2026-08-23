@@ -63,7 +63,7 @@ report exists.
 - [x] DDP context/wrapping utilities.
 - [x] Coordinator lease model.
 - [x] Networked coordinator service.
-- [ ] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
+- [x] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
 - [ ] Distributed checkpoint with topology-independent restore.
 - [ ] Failure injection: actor, inference replica and learner-rank restart.
 
@@ -71,8 +71,9 @@ report exists.
 loss, and >=70% weak-scaling efficiency at the target topology.
 
 The user explicitly authorized M2 implementation while retaining M1 as `formal validation pending`.
-The networked coordinator carries control metadata only; tensor and trajectory payloads must use
-direct data channels.
+The coordinator carries control metadata only. `NetworkExperienceService` and
+`NetworkPolicyService` expose direct authenticated TCP channels with bounded frames, payload
+integrity checks, request-ID idempotency, experience backpressure and monotonic policy versions.
 
 ## M3 — algorithms and replay
 
