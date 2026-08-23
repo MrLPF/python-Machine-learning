@@ -65,7 +65,7 @@ report exists.
 - [x] Networked coordinator service.
 - [x] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
 - [x] Distributed checkpoint with topology-independent restore.
-- [ ] Failure injection: actor, inference replica and learner-rank restart.
+- [x] Failure injection: actor, inference replica and learner-rank restart.
 
 **Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
 loss, and >=70% weak-scaling efficiency at the target topology.
@@ -76,7 +76,11 @@ The coordinator carries control metadata only. `NetworkExperienceService` and
 integrity checks, request-ID idempotency, experience backpressure and monotonic policy versions.
 `DistributedCheckpointManager` uses PyTorch Distributed Checkpoint for parallel shard I/O and
 load-time resharding, while a ForgeRL JSON manifest provides an atomic completion boundary and
-records the global step, policy version and saved world size.
+records the global step, policy version and saved world size. `RestartableProcess` supervises Actor
+and inference component replacement with generation fencing; a failed DDP learner group is restarted
+from the last completed distributed checkpoint.
+
+The remaining M2 work is execution of the formal two-node validation and weak-scaling gate.
 
 ## M3 — algorithms and replay
 
