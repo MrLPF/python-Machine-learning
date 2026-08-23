@@ -300,7 +300,14 @@ def _decode_numpy_entries(
         ).copy()
         decoded[path] = array.reshape(shape)
     ordered_ranges = sorted(ranges)
-    if any(right_start < left_end for (_, left_end), (right_start, _) in zip(ordered_ranges, ordered_ranges[1:], strict=False)):
+    if any(
+        right_start < left_end
+        for (_, left_end), (right_start, _) in zip(
+            ordered_ranges,
+            ordered_ranges[1:],
+            strict=False,
+        )
+    ):
         raise _RequestError("invalid_payload", "array byte ranges overlap")
     return decoded
 
@@ -325,7 +332,10 @@ def decode_transition_batch(metadata: Mapping[str, Any], payload: bytes) -> Tran
         try:
             return arrays[(name,)]
         except KeyError as error:
-            raise _RequestError("invalid_payload", f"required transition array {name} is missing") from error
+            raise _RequestError(
+                "invalid_payload",
+                f"required transition array {name} is missing",
+            ) from error
 
     try:
         batch = TransitionBatch(
@@ -387,7 +397,7 @@ def encode_policy_state_dict(
         dtype_name = str(tensor.dtype).removeprefix("torch.")
         if dtype_name not in _TORCH_DTYPES:
             raise ValueError(f"unsupported tensor dtype {tensor.dtype} for {name!r}")
-        raw = tensor.view(torch.uint8).reshape(-1).numpy().tobytes()
+        raw = tensor.reshape(-1).view(torch.uint8).numpy().tobytes()
         entries.append(
             {
                 "name": str(name),
@@ -437,14 +447,24 @@ def decode_policy_state_dict(
         dtype = _TORCH_DTYPES[dtype_name]
         expected_bytes = math.prod(shape) * torch.empty((), dtype=dtype).element_size()
         if expected_bytes != nbytes or offset + nbytes > len(payload):
-            raise _RequestError("invalid_payload", f"tensor byte range is invalid for {name!r}")
+            raise _RequestError(
+                "invalid_payload",
+                f"tensor byte range is invalid for {name!r}",
+            )
         ranges.append((offset, offset + nbytes))
         raw = np.frombuffer(payload, dtype=np.uint8, count=nbytes, offset=offset).copy()
         byte_tensor = torch.from_numpy(raw)
         tensor = byte_tensor.view(dtype)
         state[name] = tensor.reshape(shape).clone()
     ordered_ranges = sorted(ranges)
-    if any(right_start < left_end for (_, left_end), (right_start, _) in zip(ordered_ranges, ordered_ranges[1:], strict=False)):
+    if any(
+        right_start < left_end
+        for (_, left_end), (right_start, _) in zip(
+            ordered_ranges,
+            ordered_ranges[1:],
+            strict=False,
+        )
+    ):
         raise _RequestError("invalid_payload", "tensor byte ranges overlap")
     return state
 
