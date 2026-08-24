@@ -1,0 +1,33 @@
+version: 1
+suites:
+  ci_discrete:
+    environment: CartPole-v1
+    algorithm: ppo
+    seeds: [1, 2, 3, 4, 5]
+    target_metric: mean_return
+    target_value: 475
+  ci_continuous:
+    environment: Pendulum-v1
+    algorithm: ppo
+    seeds: [1, 2, 3, 4, 5]
+    target_metric: mean_return
+    target_value: -200
+  multi_agent:
+    environment: pettingzoo:mpe/simple_spread_v3
+    algorithm: mappo
+    seeds: [1, 2, 3, 4, 5]
+  cloud_continuous:
+    environment: Ant-v5
+    algorithm: ppo
+    seeds: [1, 2, 3, 4, 5]
+metrics:
+  - valid_rows_per_second
+  - useful_sample_ratio
+  - inference_latency_p50_ms
+  - inference_latency_p95_ms
+  - inference_latency_p99_ms
+  - policy_lag_p95
+  - queue_age_p95_ms
+  - time_to_target_seconds
+  - strong_scaling_efficiency
+  - weak_scaling_efficiency

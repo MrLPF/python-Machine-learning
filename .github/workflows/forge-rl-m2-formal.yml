@@ -1,0 +1,151 @@
+name: ForgeRL M2 formal acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      node0:
+        description: "SSH-reachable hostname or IP for learner node 0"
+        required: true
+        type: string
+      node1:
+        description: "SSH-reachable hostname or IP for learner node 1"
+        required: true
+        type: string
+      remote_workdir:
+        description: "Existing writable directory on both learner nodes"
+        required: true
+        default: "/tmp/forgerl-m2"
+        type: string
+      python_command:
+        description: "Pinned Python executable already containing PyTorch"
+        required: true
+        default: "python3"
+        type: string
+      master_port:
+        description: "Free TCP port reachable between both learner nodes"
+        required: true
+        default: "29500"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  two-node-acceptance:
+    runs-on: [self-hosted, linux, x64, forgerl-m2-controller]
+    timeout-minutes: 60
+    env:
+      NODE0: ${{ inputs.node0 }}
+      NODE1: ${{ inputs.node1 }}
+      REMOTE_WORKDIR: ${{ inputs.remote_workdir }}
+      PYTHON_COMMAND: ${{ inputs.python_command }}
+      MASTER_PORT: ${{ inputs.master_port }}
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate controlled node inventory
+        run: |
+          set -euo pipefail
+          test -n "$NODE0"
+          test -n "$NODE1"
+          test "$NODE0" != "$NODE1"
+          command -v ssh
+          command -v rsync
+
+      - name: Synchronize the exact ForgeRL source to both nodes
+        run: |
+          set -euo pipefail
+          for node in "$NODE0" "$NODE1"; do
+            ssh "$node" "mkdir -p '$REMOTE_WORKDIR/ForgeRL'"
+            rsync -az --delete ForgeRL/ "$node:$REMOTE_WORKDIR/ForgeRL/"
+            ssh "$node" "cd '$REMOTE_WORKDIR/ForgeRL' && $PYTHON_COMMAND -c 'import torch, numpy' && $PYTHON_COMMAND -m pip install -e . --no-deps"
+          done
+
+      - name: Run the pinned one-rank baseline on node 0
+        run: |
+          set -euo pipefail
+          RESULT_DIR="/tmp/forgerl-m2-${GITHUB_RUN_ID}"
+          ssh "$NODE0" "mkdir -p '$RESULT_DIR' && cd '$REMOTE_WORKDIR/ForgeRL' && \
+            env RANK=0 LOCAL_RANK=0 WORLD_SIZE=1 \
+                OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+            timeout 900 $PYTHON_COMMAND scripts/benchmark_m2_worker.py \
+              --controlled \
+              --advertise-host '$NODE0' \
+              --physical-node-id '$NODE0' \
+              --warmup-steps 10 \
+              --measured-steps 100 \
+              --valid-rows-per-rank 256 \
+              --invalid-rows-per-batch 1 \
+              --observation-width 64 \
+              --hidden-size 128 \
+              --policy-publish-interval 10 \
+              --output '$RESULT_DIR/m2-baseline.json'"
+
+      - name: Run the two-node two-rank target
+        run: |
+          set -euo pipefail
+          RESULT_DIR="/tmp/forgerl-m2-${GITHUB_RUN_ID}"
+          mkdir -p ForgeRL/benchmarks/results/m2-formal
+          ssh "$NODE0" "cd '$REMOTE_WORKDIR/ForgeRL' && \
+            env RANK=0 LOCAL_RANK=0 WORLD_SIZE=2 MASTER_ADDR='$NODE0' MASTER_PORT='$MASTER_PORT' \
+                OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+            timeout 900 $PYTHON_COMMAND scripts/benchmark_m2_worker.py \
+              --controlled \
+              --advertise-host '$NODE0' \
+              --physical-node-id '$NODE0' \
+              --warmup-steps 10 \
+              --measured-steps 100 \
+              --valid-rows-per-rank 256 \
+              --invalid-rows-per-batch 1 \
+              --observation-width 64 \
+              --hidden-size 128 \
+              --policy-publish-interval 10 \
+              --output '$RESULT_DIR/m2-target.json'" \
+              > ForgeRL/benchmarks/results/m2-formal/node0.log 2>&1 &
+          PID0=$!
+          ssh "$NODE1" "mkdir -p '$RESULT_DIR' && cd '$REMOTE_WORKDIR/ForgeRL' && \
+            env RANK=1 LOCAL_RANK=1 WORLD_SIZE=2 MASTER_ADDR='$NODE0' MASTER_PORT='$MASTER_PORT' \
+                OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+            timeout 900 $PYTHON_COMMAND scripts/benchmark_m2_worker.py \
+              --controlled \
+              --advertise-host '$NODE1' \
+              --physical-node-id '$NODE1' \
+              --warmup-steps 10 \
+              --measured-steps 100 \
+              --valid-rows-per-rank 256 \
+              --invalid-rows-per-batch 1 \
+              --observation-width 64 \
+              --hidden-size 128 \
+              --policy-publish-interval 10 \
+              --output '$RESULT_DIR/m2-target-rank1.json'" \
+              > ForgeRL/benchmarks/results/m2-formal/node1.log 2>&1 &
+          PID1=$!
+          wait "$PID0"
+          wait "$PID1"
+
+      - name: Evaluate the M2 GO gate on node 0
+        run: |
+          set -euo pipefail
+          RESULT_DIR="/tmp/forgerl-m2-${GITHUB_RUN_ID}"
+          ssh "$NODE0" "cd '$REMOTE_WORKDIR/ForgeRL' && \
+            $PYTHON_COMMAND scripts/benchmark_m2_acceptance.py \
+              --baseline '$RESULT_DIR/m2-baseline.json' \
+              --target '$RESULT_DIR/m2-target.json' \
+              --efficiency-gate 0.70 \
+              --require-go \
+              --output '$RESULT_DIR/m2-final.json'"
+          scp "$NODE0:$RESULT_DIR/m2-baseline.json" ForgeRL/benchmarks/results/m2-formal/
+          scp "$NODE0:$RESULT_DIR/m2-target.json" ForgeRL/benchmarks/results/m2-formal/
+          scp "$NODE0:$RESULT_DIR/m2-final.json" ForgeRL/benchmarks/results/m2-formal/
+
+      - name: Upload formal M2 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m2-formal
+          path: ForgeRL/benchmarks/results/m2-formal
+          if-no-files-found: error

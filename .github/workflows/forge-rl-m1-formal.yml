@@ -1,0 +1,137 @@
+name: ForgeRL M1 formal acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      device:
+        description: Pre-provisioned benchmark device
+        required: true
+        default: cpu
+        type: choice
+        options: [cpu, cuda]
+      seeds:
+        description: Exactly five or more comma-separated seeds
+        required: true
+        default: "1,2,3,4,5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  formal-m1:
+    runs-on: [self-hosted, linux, x64, forgerl-benchmark]
+    timeout-minutes: 720
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify pinned benchmark image
+        working-directory: ForgeRL
+        run: |
+          command -v taskset >/dev/null || { echo "taskset is required" >&2; exit 2; }
+          test -n "${FORGERL_CPUSET:-}" || {
+            echo "FORGERL_CPUSET must identify the pinned benchmark cores" >&2
+            exit 2
+          }
+          python - <<'PY'
+          import os
+          import gymnasium
+          import numpy
+          import torch
+          expected_torch = os.environ.get("FORGERL_EXPECTED_TORCH")
+          expected_gym = os.environ.get("FORGERL_EXPECTED_GYMNASIUM")
+          if expected_torch and torch.__version__ != expected_torch:
+              raise SystemExit(f"torch {torch.__version__} != {expected_torch}")
+          if expected_gym and gymnasium.__version__ != expected_gym:
+              raise SystemExit(f"gymnasium {gymnasium.__version__} != {expected_gym}")
+          requested = "${{ inputs.device }}"
+          if requested == "cuda" and not torch.cuda.is_available():
+              raise SystemExit("CUDA formal acceptance requested but CUDA is unavailable")
+          print({
+              "python": __import__("sys").version.split()[0],
+              "torch": torch.__version__,
+              "numpy": numpy.__version__,
+              "gymnasium": gymnasium.__version__,
+              "cuda": torch.cuda.is_available(),
+              "cpuset": os.environ["FORGERL_CPUSET"],
+          })
+          PY
+          python -m pip install -e . --no-deps
+      - name: Run five-seed CartPole/Pendulum vector-batch learning gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_learning.py \
+              --seeds "${{ inputs.seeds }}" \
+              --environments CartPole-v1,Pendulum-v1 \
+              --device "${{ inputs.device }}" \
+              --require-learning-gate \
+              --output benchmarks/results/m1-learning-formal.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("benchmarks/results/m1-learning-formal.json").read_text())
+          if report.get("status") != "GO" or not report.get("learning_gate_passed"):
+              raise SystemExit("formal learning gate did not pass")
+          runtimes = {
+              run.get("runtime_metrics", {}).get("runtime")
+              for run in report.get("runs", [])
+              if run.get("subject") == "v2"
+          }
+          if runtimes != {"vector-batch-learning"}:
+              raise SystemExit(f"formal v2 learning used unexpected runtimes: {runtimes}")
+          PY
+      - name: Run controlled vector-batch stability gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_double_buffer.py \
+              --actors 8 --requests-per-actor 2000 --items-per-request 8 \
+              --width 64 --output-size 4 --max-batch-items 128 \
+              --min-batch-items 64 --max-wait-ms 0.5 \
+              --v2-runtime vector-batch \
+              --repeats 3 --warmup-repeats 1 --controlled \
+              --output benchmarks/results/m1-vector-batch-controlled.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("benchmarks/results/m1-vector-batch-controlled.json").read_text())
+          if report.get("status") != "DOUBLE_BUFFER_CANDIDATE":
+              raise SystemExit(f"vector-batch stability gate failed: {report.get('status')}")
+          if not report.get("formal_eligible") or not report.get("double_buffer_stable_two_x"):
+              raise SystemExit("vector-batch evidence is not formal and stable >=2x")
+          if not report.get("work_conservation", {}).get("identical"):
+              raise SystemExit("single/double-buffer work is not identical")
+          if not report.get("single_buffer", {}).get("correctness_passed"):
+              raise SystemExit("single-buffer correctness failed")
+          if not report.get("double_buffer", {}).get("correctness_passed"):
+              raise SystemExit("double-buffer correctness failed")
+          PY
+      - name: Run final vector-batch M1 gate
+        working-directory: ForgeRL
+        run: |
+          taskset -c "$FORGERL_CPUSET" \
+            python scripts/benchmark_m1_acceptance.py \
+              --actors 8 --requests-per-actor 2000 --items-per-request 8 \
+              --width 64 --max-batch-items 128 \
+              --v2-min-batch-items 64 --legacy-min-batch-items 1 \
+              --v2-runtime vector-batch \
+              --device "${{ inputs.device }}" \
+              --throughput-gate 2.0 \
+              --learning-report benchmarks/results/m1-learning-formal.json \
+              --require-go \
+              --output benchmarks/results/m1-final.json
+      - name: Upload formal M1 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forgerl-m1-formal-evidence
+          path: |
+            ForgeRL/benchmarks/results/m1-learning-formal.json
+            ForgeRL/benchmarks/results/m1-vector-batch-controlled.json
+            ForgeRL/benchmarks/results/m1-final.json
+          if-no-files-found: warn

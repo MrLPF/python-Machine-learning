@@ -1,0 +1,23 @@
+services:
+  learner0:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.cpu
+    environment:
+      RANK: "0"
+      LOCAL_RANK: "0"
+      WORLD_SIZE: "2"
+      MASTER_ADDR: learner0
+      MASTER_PORT: "29500"
+  learner1:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.cpu
+    depends_on:
+      - learner0
+    environment:
+      RANK: "1"
+      LOCAL_RANK: "1"
+      WORLD_SIZE: "2"
+      MASTER_ADDR: learner0
+      MASTER_PORT: "29500"

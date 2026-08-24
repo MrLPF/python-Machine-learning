@@ -1,0 +1,27 @@
+name: ForgeRL GPU learner smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  torchrun:
+    runs-on: [self-hosted, linux, x64, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ForgeRL
+        working-directory: ForgeRL
+        run: pip install -e '.[dev]'
+      - name: Run local multi-GPU learner group
+        working-directory: ForgeRL
+        env:
+          FORGE_RL_EXPECTED_GPUS: "2"
+        run: |
+          python - <<'PY'
+          import os, torch
+          expected = int(os.environ['FORGE_RL_EXPECTED_GPUS'])
+          assert torch.cuda.device_count() >= expected, (torch.cuda.device_count(), expected)
+          PY
+          torchrun --standalone --nproc-per-node=2 scripts/distributed_smoke.py

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source": "user-uploaded forge_rl(1).zip",
+  "archive_sha256": "ce8e37af749654302d839c098b203563918c58f729cbe711400341003e9ac50c",
+  "captured_on": "2026-08-21",
+  "files": {
+    "forge_rl/core/predictor.py": "b6165c4123951f5affd1c017ac70298242e3c846e42a3c25f9bbfbeaad123714",
+    "forge_rl/core/protocol.py": "cdf95f5becb4eec540bc46c16140dd92edb8d7d4509012611a079faa71479a04",
+    "forge_rl/core/trajectory.py": "9a37c29d5be894bc2370d1313542d1fa53b838f619bece17f833addce90ca6ab",
+    "forge_rl/core/rollout_queue.py": "42871e1cfd70eef4ebe3e572817e85792d035835456ca6b5f44fb8ce105e4bfa",
+    "forge_rl/core/batching.py": "6cc1dbe6cd244a1e2af4b9d150649b88451abe6cc8ef3a54cf5b85bdaadc8a78"
+  },
+  "published_scope": "benchmark-only behavioral reference",
+  "excluded": [
+    "proprietary or simulator-specific adapters",
+    "bytecode caches",
+    "domain scenarios and assets"
+  ],
+  "notes": [
+    "The repository does not publish the complete uploaded archive.",
+    "LegacyV1InferenceRuntime preserves the central predictor plus multiprocessing Queue/pickle data path used for the M1 transport comparison.",
+    "It is not a substitute for the five-seed end-to-end learning comparison required by the M1 Go gate."
+  ]
+}
