@@ -66,9 +66,14 @@ report exists.
 - [x] Direct EnvRunner-to-Experience and Learner-to-Policy channels.
 - [x] Distributed checkpoint with topology-independent restore.
 - [x] Failure injection: actor, inference replica and learner-rank restart.
+- [x] Add a controlled one-rank/two-node weak-scaling acceptance harness.
+- [x] Add a manual two-node workflow with deadlock timeout and persisted evidence.
+- [ ] Run the formal two-node gate and persist an `m2-final.json` report whose status is `GO`.
 
-**Go gate:** two nodes, at least two learner ranks, no deadlock, no invalid transition entering a
-loss, and >=70% weak-scaling efficiency at the target topology.
+**Go gate:** two physical nodes, at least two learner ranks, no deadlock, no invalid transition
+entering a loss, and >=70% weak-scaling efficiency at the target topology. The one-rank baseline
+and two-rank target must use identical per-rank work. Container or hosted-runner screening does not
+constitute M2 acceptance.
 
 The user explicitly authorized M2 implementation while retaining M1 as `formal validation pending`.
 The coordinator carries control metadata only. `NetworkExperienceService` and
@@ -80,7 +85,10 @@ records the global step, policy version and saved world size. `RestartableProces
 and inference component replacement with generation fencing; a failed DDP learner group is restarted
 from the last completed distributed checkpoint.
 
-The remaining M2 work is execution of the formal two-node validation and weak-scaling gate.
+`benchmark_m2_worker.py` sends each rank's transitions directly to the peer Experience service,
+trains only on valid peer rows, publishes complete policy snapshots to the peer Policy service and
+records global identity audits. `benchmark_m2_acceptance.py` computes the weak-scaling efficiency and
+is the only component allowed to emit M2 `GO`.
 
 ## M3 — algorithms and replay
 
