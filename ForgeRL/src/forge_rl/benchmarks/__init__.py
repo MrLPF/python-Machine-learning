@@ -24,6 +24,13 @@ from .m1_mailbox_acceptance import (
     run_process_mailbox_m1_acceptance,
     run_vector_batch_m1_acceptance,
 )
+from .m2_acceptance import (
+    M2AcceptanceReport,
+    M2RunReport,
+    M2WorkerConfig,
+    evaluate_m2_acceptance,
+    run_m2_worker,
+)
 from .ppo_learning import (
     ENVIRONMENT_SPECS,
     EvaluationPoint,
@@ -49,6 +56,9 @@ __all__ = [
     "LegacyV1InferenceRuntime",
     "M1AcceptanceConfig",
     "M1AcceptanceReport",
+    "M2AcceptanceReport",
+    "M2RunReport",
+    "M2WorkerConfig",
     "PPOHyperparameters",
     "ReferencePPOPolicy",
     "RuntimeReport",
@@ -56,6 +66,7 @@ __all__ = [
     "TransitionAudit",
     "audit_transition_identities",
     "compute_gae",
+    "evaluate_m2_acceptance",
     "identities_from_batch",
     "run_actor_local_m1_acceptance",
     "run_event_learning_benchmark",
@@ -63,6 +74,7 @@ __all__ = [
     "run_in_process_m1_acceptance",
     "run_learning_benchmark",
     "run_m1_acceptance",
+    "run_m2_worker",
     "run_process_mailbox_m1_acceptance",
     "run_synthetic_policy",
     "run_vector_batch_m1_acceptance",
